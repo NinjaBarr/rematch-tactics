@@ -868,7 +868,7 @@ function migrate5(d){
 
 let doc, cur = 0, tool = 'select', color = '#ffffff', sel = null;
 let pieceCfg = {ball:'football', figures:false};
-let ov = {callouts:false, keytips:true, names:true, grid:true, lanes:true, control:false, rings:false, trails:true, shots:false, range:false, notouch:true};
+let ov = {callouts:false, keytips:true, names:true, grid:false, lanes:false, control:false, rings:false, trails:false, shots:false, range:false, notouch:false}; /* first launch: every Analysis overlay starts off */
 const PASS_RANGES = [{name:'SHOT PASS', r:60, dash:[]}, {name:'TAP PASS', r:55, dash:[1, .7]}];
 let passCfg = {noTouch:5, lift:4, runSame:false, eeAdd:6, eeV:4};
 let customColors = [];
