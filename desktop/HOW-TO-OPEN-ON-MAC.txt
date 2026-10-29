@@ -1,0 +1,19 @@
+REMATCH Tactics for Mac
+=======================
+
+1. Unzip, then drag "REMATCH Tactics.app" into your Applications folder.
+2. Double-click it. The first time, macOS says it can't check the app, because
+   it isn't from the App Store or a paid Apple developer account.
+3. Open System Settings > Privacy & Security, scroll down, and click
+   "Open Anyway" next to REMATCH Tactics. Confirm once more.
+   (On older macOS: right-click the app > Open > Open.)
+After that it opens normally every time. Drag it to the Dock to keep it there.
+
+Which download?  Apple menu > About This Mac:
+  "Chip: Apple M1/M2/M3/M4..."  -> REMATCH Tactics-Mac-AppleSilicon.zip
+  "Processor: Intel..."          -> REMATCH Tactics-Mac-Intel.zip
+
+Your plays are files in Documents > REMATCH Tactics Plays. Make folders in
+there (in Finder or with "+ Folder" in the app) to sort them; the app shows
+them as categories. Plays > Change picks a different folder (iCloud Drive,
+Dropbox...) if you want them synced between computers.

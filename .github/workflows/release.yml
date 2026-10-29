@@ -1,0 +1,34 @@
+# Push a tag like v1.0.1 (matching VERSION) and GitHub builds the Windows installer and publishes the release.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install NSIS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
+      - name: Check tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "v$(tr -d ' \n\r' < VERSION)" = "${GITHUB_REF_NAME}"
+      - name: Build
+        run: REPO="${GITHUB_REPOSITORY}" bash scripts/build-windows.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$(tr -d ' \n\r' < VERSION)"
+          NOTES=notes/$TAG.md; [ -f "$NOTES" ] || { echo "REMATCH Tactics ${TAG#v}" > /tmp/n.md; NOTES=/tmp/n.md; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/REMATCH-Tactics-Setup.exe --clobber
+          else
+            gh release create "$TAG" out/REMATCH-Tactics-Setup.exe --title "REMATCH Tactics ${TAG#v}" --notes-file "$NOTES"
+          fi

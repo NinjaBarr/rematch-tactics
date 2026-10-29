@@ -1,0 +1,8 @@
+{
+  "name": "rematch-tactics",
+  "productName": "REMATCH Tactics",
+  "version": "1.0.0",
+  "description": "Tactics board for REMATCH",
+  "author": "BlueWing",
+  "main": "main.js"
+}

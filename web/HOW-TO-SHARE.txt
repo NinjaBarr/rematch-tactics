@@ -1,0 +1,46 @@
+REMATCH Tactics - put it online so anyone (iPhone, Android, PC) can use it
+==========================================================================
+
+This folder is a complete website. Once it's online you get a normal web
+address to send people. On iPhone they open it in Safari and tap
+Share > Add to Home Screen, and it becomes an app with its own icon that
+opens full screen and works offline.
+
+Easiest: Netlify Drop (free, about 2 minutes, no coding)
+  1. Unzip rematch-tactics-web.zip so you have a folder with index.html in it.
+  2. On a computer, go to  https://app.netlify.com/drop
+  3. Drag that whole folder onto the page.
+  4. Sign up / log in (free) to claim the site. Until you claim it, Netlify keeps
+     it behind a temporary password, so claim it before sending the link out.
+  5. You get an address like https://something-random.netlify.app
+     In the project settings you can change the name, e.g. rematch-tactics.netlify.app
+  To update later: open the project in Netlify > Production deploys > drag the
+  new folder into the drop area.
+  The address stays the same, and people's phones pick up the new version.
+
+Alternative: GitHub Pages (free, good if you already use GitHub)
+  1. New repository (public), e.g. rematch-tactics.
+  2. Add file > Upload files > drag everything inside this folder in > Commit.
+  3. Settings > Pages > Source: Deploy from a branch > main / (root) > Save.
+  4. A minute later it's at https://YOUR-NAME.github.io/rematch-tactics/
+
+What to tell your friends (iPhone)
+  1. Open the link in Safari.
+  2. Tap the Share button (square with an arrow), then "Add to Home Screen".
+  3. Open "Tactics" from the home screen. It runs full screen and offline.
+  Android: open the link in Chrome > menu > "Add to Home screen" / "Install app".
+
+Co-op (planning together)
+  Top bar > Co-op > type your name > Host a session. Send the 6-letter room
+  code (or "Copy invite link" on the website) to the others; they open Co-op,
+  type their name and the code, and press Join. Everyone sees the same board,
+  each other's cursors, and edits live. As host you can switch off
+  "Everyone can edit" (others watch) and switch on "Everyone follows me"
+  (your step changes and playback show on everyone's screen).
+
+Good to know
+  - Each person's plays are saved on their own device (nothing is uploaded).
+    On a computer in Chrome or Edge, Plays > "Use a folder" keeps them as files
+    in a folder you choose, with its subfolders as categories.
+  - To send someone a play: Share > Export play file; they use Import.
+  - On a phone, Export PNG opens the share sheet (Save Image puts it in Photos).
