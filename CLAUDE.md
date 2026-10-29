@@ -14,8 +14,8 @@ Tactics board for the 5v5 football game REMATCH, made by BlueWing (Joseph). One 
 
 ## Releasing (Joseph only uses the Windows installer)
 1. Edit `src/app.html` (and `desktop/` if needed); bump `VERSION`; optionally add `notes/vX.Y.Z.md`.
-2. Commit, push to main, then push tag `vX.Y.Z` (must equal VERSION).
-3. `.github/workflows/release.yml` builds the installer and publishes the GitHub release. Installed apps see it via the update check (`checkForUpdate` in app.html, GitHub releases API) and show a Download bar.
+2. Commit and push to main.
+3. Trigger the workflow: `gh api --method POST repos/NinjaBarr/rematch-tactics/actions/workflows/release.yml/dispatches -f ref=main` (Claude sessions can't push tags — 403). It builds the installer and publishes release `v<VERSION>` (creating the tag). Pushing a tag from a normal git client also works. Installed apps see it via the update check (`checkForUpdate` in app.html, GitHub releases API) and show a Download bar.
 The session cannot upload release assets directly (binary uploads are blocked); the workflow does it.
 
 ## Conventions
