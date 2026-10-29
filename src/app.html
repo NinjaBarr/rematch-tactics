@@ -264,6 +264,7 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .lib li.libmenu label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
 .lib li.libmenu select{flex:1;height:28px}
 .lib li.empty{background:none;padding:2px 0;color:var(--muted);font-size:12px;display:block}
+.lib li.tut-back{padding-top:6px}
 #libCard.drop-files{outline:2px dashed var(--accent);outline-offset:-4px}
 .lib li.current{border-color:var(--accent)}
 .lib .meta{flex:1;min-width:0}
@@ -1376,7 +1377,7 @@ function saveLib(lib){ try { localStorage.setItem(LIB_KEY, JSON.stringify(lib));
 let saveTimer = 0;
 let launch = 'resume'; /* what opens on launch: 'resume' the last play, or a 'fresh' kickoff */
 function autosave(){ clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(CUR_KEY, JSON.stringify({doc, cur})); } catch {} }, 250); }
-function saveSettings(){ try { localStorage.setItem(SET_KEY, JSON.stringify({launch, penCfg, textCfg, pieceCfg, ov, speed, loop, soundOn, tool, color, passCfg, customColors, pitchCol:pitchCols['5v5'], pitchCols, viewId, viewFlip, libSort:LIB.sort, animMoves})); } catch {} }
+function saveSettings(){ try { localStorage.setItem(SET_KEY, JSON.stringify({launch, penCfg, textCfg, pieceCfg, ov, speed, loop, soundOn, tool, color, passCfg, customColors, pitchCol:pitchCols['5v5'], pitchCols, viewId, viewFlip, libSort:LIB.sort, animMoves, hideTut})); } catch {} }
 
 /* ---------- undo ---------- */
 function snapshot(){ undoStack.push(JSON.stringify({doc, cur})); if (undoStack.length > 150) undoStack.shift(); redoStack = []; syncUndo(); }
@@ -2572,7 +2573,7 @@ function trailInfo(){ return ov.trails && cur > 0 ? {prev:doc.frames[cur-1].pos,
    Feet step under each player while they move (shorter, ball-side touches when dribbling), and the passer
    or shooter winds up and swings through the ball at the moment it is struck. Figures get full limb
    movement; pucks and flat tokens show boots stepping out from under the disc and a pop at the strike. */
-let animMoves = true;
+let animMoves = true, hideTut = false;
 let motionNow = null; /* {id: {A, ph, dir, drib, ballSide, kick:{k, dir, pow, air}}, pops:[...] } while a frame is drawn */
 const KICK_W = 260, KICK_F = 240; /* ms of wind-up before contact, follow-through after */
 const STRIDE = 2.3; /* pitch units per step */
@@ -4055,14 +4056,15 @@ function renderLibrary(){
   const ul = $('#lib'); if (!ul || !doc) return;
   libSource(); libCrumbs();
   const tutOpen = !!doc.tutorial;
-  const tut = `<li tabindex="0" class="tut${tutOpen ? ' current' : ''}" data-id="__tutorial" title="Open the tutorial"><div class="meta"><b>Tutorial</b><small>Wall-bank escape · 3 steps</small></div>${tutOpen ? '<small class="open-tag">Open</small>' : ''}</li>`;
+  const tut = `<li tabindex="0" class="tut${tutOpen ? ' current' : ''}" data-id="__tutorial" title="Open the tutorial"><div class="meta"><b>Tutorial</b><small>Wall-bank escape · 3 steps</small></div>${tutOpen ? '<small class="open-tag">Open</small>' : ''}<button class="btn icon more" data-act="tuthide" title="Remove the tutorial from Plays (you can bring it back)" aria-label="Remove the tutorial">✕</button></li>`;
+  const tutBack = hideTut ? `<li class="empty tut-back"><button class="lnk" data-act="tutshow">Show the tutorial again</button></li>` : '';
   const bySort = (a, b) => LIB.sort === 'az' ? libSort(a.doc.name, b.doc.name) : (b.doc.updated || 0) - (a.doc.updated || 0);
   if (!LIB.ready && !LIB.plays.length){ ul.innerHTML = '<li class="empty">Reading your plays folder…</li>'; return; }
   if (LIB.q){
     const terms = LIB.q.toLowerCase().split(/\s+/).filter(Boolean);
     const folds = LIB.folders.filter(f => terms.every(t => baseOf(f).toLowerCase().includes(t)));
     const plays = libMatches().sort(bySort);
-    const tutHit = terms.every(t => 'tutorial wall-bank escape'.includes(t));
+    const tutHit = !hideTut && terms.every(t => 'tutorial wall-bank escape'.includes(t));
     ul.innerHTML = (tutHit ? tut : '') + folds.map(folderRow).join('') + plays.map(p => playRow(p, true)).join('') ||
       `<li class="empty">No plays match “${esc(LIB.q)}”.</li>`;
     return;
@@ -4071,7 +4073,7 @@ function renderLibrary(){
   const plays = LIB.plays.filter(p => p.folder === LIB.view).sort(bySort);
   const adding = LIB.adding ? `<li class="fold renaming">${ICON_FOLDER}<input class="field" id="libNewFolder" placeholder="Folder name, e.g. Kickoffs" maxlength="60" aria-label="New folder name"></li>` : '';
   const empty = !folds.length && !plays.length ? `<li class="empty">${LIB.view ? 'Nothing in this folder yet. Save play or Import puts plays here, or drag one in.' : 'No saved plays yet. Save play keeps this one here.'}</li>` : '';
-  ul.innerHTML = (LIB.view ? '' : tut) + adding + folds.map(folderRow).join('') + plays.map(p => playRow(p, false)).join('') + empty;
+  ul.innerHTML = (LIB.view || hideTut ? '' : tut) + adding + folds.map(folderRow).join('') + plays.map(p => playRow(p, false)).join('') + empty + (LIB.view ? '' : tutBack);
   const f = $('#libNewFolder') || $('#libRename'); if (f && document.activeElement !== f){ f.focus(); f.select(); }
 }
 function openEntry(p){ stopPlay(); saveToLibrary(true); snapshot(); doc = normalize(clone(p.doc)); cur = 0; sel = null; LIB.menu = null; refreshAll(); toast(`Opened “${doc.name}”.`); }
@@ -4134,6 +4136,8 @@ $('#lib').addEventListener('click', e => {
   if (e.target.closest('input,select')) return;
   const li = e.target.closest('li'); if (!li) return;
   const b = e.target.closest('[data-act]'), act = b && b.dataset.act;
+  if (act === 'tuthide'){ hideTut = true; saveSettings(); renderLibrary(); toast('Removed the tutorial from Plays. "Show the tutorial again" at the bottom of the list brings it back.'); return; }
+  if (act === 'tutshow'){ hideTut = false; saveSettings(); renderLibrary(); toast('The tutorial is back at the top of Plays.'); return; }
   if (li.dataset.id === '__tutorial'){ if (doc.tutorial) return; stopPlay(); saveToLibrary(true); snapshot(); doc = examplePlay(); cur = 0; sel = null; refreshAll(); toast('Opened the tutorial. Press Space to play it.'); return; }
   if (li.dataset.folder != null){
     const f = li.dataset.folder;
@@ -4839,7 +4843,7 @@ function panelInit(){
 
 /* ---------- boot ---------- */
 function boot(){
-  try { const s = JSON.parse(localStorage.getItem(SET_KEY)); if (s){ if (s.launch === 'fresh') launch = 'fresh'; if (s.libSort === 'az') LIB.sort = 'az'; if (s.textCfg && TEXT_S[s.textCfg.s]) textCfg = {s:s.textCfg.s, box:!!s.textCfg.box, clear:!!s.textCfg.clear}; if (s.penCfg && PEN_W[s.penCfg.w]) penCfg = {w:s.penCfg.w, dots:!!s.penCfg.dots, clear:!!s.penCfg.clear}; ov = {...ov, ...s.ov}; speed = s.speed || 1; loop = !!s.loop; soundOn = s.soundOn !== false; animMoves = s.animMoves !== false; if (VIEWS[s.viewId]) viewId = s.viewId; viewFlip = !!s.viewFlip; color = s.color || color; tool = s.tool || tool; if (s.passCfg && isFinite(s.passCfg.noTouch)) passCfg.noTouch = s.passCfg.noTouch; if (s.passCfg && isFinite(s.passCfg.lift)) passCfg.lift = s.passCfg.lift; if (s.passCfg){ passCfg.runSame = !!s.passCfg.runSame; if (isFinite(s.passCfg.eeAdd) && s.passCfg.eeV === 4) passCfg.eeAdd = s.passCfg.eeAdd; /* older saves used a percentage */ } if (Array.isArray(s.customColors)) customColors = s.customColors.slice(0, 4); if (s.pieceCfg){ if (BALLS.some(b => b.id === s.pieceCfg.ball)) pieceCfg.ball = s.pieceCfg.ball; pieceCfg.figures = !!s.pieceCfg.figures; } if (s.pitchCol && s.pitchCol.L) pitchCols['5v5'] = pitchCol = withMids(s.pitchCol); if (s.pitchCols && s.pitchCols['1v1'] && s.pitchCols['1v1'].L) pitchCols['1v1'] = withMids(s.pitchCols['1v1']); } } catch {}
+  try { const s = JSON.parse(localStorage.getItem(SET_KEY)); if (s){ if (s.launch === 'fresh') launch = 'fresh'; if (s.libSort === 'az') LIB.sort = 'az'; if (s.textCfg && TEXT_S[s.textCfg.s]) textCfg = {s:s.textCfg.s, box:!!s.textCfg.box, clear:!!s.textCfg.clear}; if (s.penCfg && PEN_W[s.penCfg.w]) penCfg = {w:s.penCfg.w, dots:!!s.penCfg.dots, clear:!!s.penCfg.clear}; ov = {...ov, ...s.ov}; speed = s.speed || 1; loop = !!s.loop; soundOn = s.soundOn !== false; animMoves = s.animMoves !== false; hideTut = !!s.hideTut; if (VIEWS[s.viewId]) viewId = s.viewId; viewFlip = !!s.viewFlip; color = s.color || color; tool = s.tool || tool; if (s.passCfg && isFinite(s.passCfg.noTouch)) passCfg.noTouch = s.passCfg.noTouch; if (s.passCfg && isFinite(s.passCfg.lift)) passCfg.lift = s.passCfg.lift; if (s.passCfg){ passCfg.runSame = !!s.passCfg.runSame; if (isFinite(s.passCfg.eeAdd) && s.passCfg.eeV === 4) passCfg.eeAdd = s.passCfg.eeAdd; /* older saves used a percentage */ } if (Array.isArray(s.customColors)) customColors = s.customColors.slice(0, 4); if (s.pieceCfg){ if (BALLS.some(b => b.id === s.pieceCfg.ball)) pieceCfg.ball = s.pieceCfg.ball; pieceCfg.figures = !!s.pieceCfg.figures; } if (s.pitchCol && s.pitchCol.L) pitchCols['5v5'] = pitchCol = withMids(s.pitchCol); if (s.pitchCols && s.pitchCols['1v1'] && s.pitchCols['1v1'].L) pitchCols['1v1'] = withMids(s.pitchCols['1v1']); } } catch {}
   let saved = null; try { saved = JSON.parse(localStorage.getItem(CUR_KEY)); } catch {}
   /* the old example play moved to the Tutorial row: drop the copy that used to be seeded into the library */
   try { if (!localStorage.getItem(TUT_KEY)){ localStorage.setItem(TUT_KEY, '1'); localStorage.setItem(SEED_KEY, '1');
