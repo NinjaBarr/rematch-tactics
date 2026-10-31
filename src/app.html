@@ -115,6 +115,8 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
 #followWrap{gap:6px;padding-right:4px}
 #followWrap select{appearance:none;-webkit-appearance:none;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;max-width:170px;padding:0 14px 0 0;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 6px) 55%,calc(100% - 2px) 55%;background-size:4px 4px;background-repeat:no-repeat}
+#otsBtn[aria-pressed="true"],#otsBtn.dimmed[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+#otsBtn.dimmed{opacity:.55}
 #focusBtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #focusBtn.dimmed{opacity:.55}
 #followWrap select option{color:#111;background:#fff;text-transform:none}
@@ -553,6 +555,7 @@ body.clean .touchbar{display:none}
         <button class="btn icon" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button>
         <label class="btn follow" id="followWrap" title="Keep the camera on the ball or one player during playback (` ball, 1–5 home, 6–0 away; K ball on/off)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg><select id="zoomFollow" aria-label="Camera follows"><option value="">Follow: off</option><option value="ball">Follow ball</option></select></label>
         <button class="btn icon" id="focusBtn" aria-pressed="false" title="Focus: dim everyone else while you follow a player" aria-label="Focus on the followed player"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button class="btn icon" id="otsBtn" aria-pressed="false" title="Over-the-shoulder: during playback the camera rides behind the followed player, like in game" aria-label="Over-the-shoulder camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 6.5a7 7 0 0 0 0 11"/><path d="M16.5 6.5a7 7 0 0 1 0 11"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg></button>
       </div>
       <div class="touchbar" id="touchbar" role="toolbar" aria-label="Drawing options" hidden></div>
       <div class="penbar" id="penbar" role="toolbar" aria-label="Pen options" hidden>
@@ -680,7 +683,7 @@ body.clean .touchbar{display:none}
     <button class="btn icon danger" id="delStep" title="Delete this step" aria-label="Delete this step"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
     <input class="field note" id="note" placeholder="Coaching note for this step" maxlength="160" aria-label="Step note">
     <div class="tl-opts">
-      <select class="field" id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="2">2×</option></select>
+      <select class="field" id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
       <label class="eye"><input type="checkbox" id="loop">Loop</label>
       <label class="eye" title="Kick sounds for passes and shots during playback"><input type="checkbox" id="sound">Sound</label>
       <label class="eye" title="Players step, dribble and kick during playback"><input type="checkbox" id="animMv">Moves</label>
@@ -1330,7 +1333,9 @@ function eatenShapes(shapes, prog){
   const out = [];
   for (const s of shapes){
     const p = prog[s.id]; if (p == null || p <= .001){ out.push(s); continue; } if (p >= .999) continue;
-    if (s.type === 'arrow'){ const pts = s.style === 'pass' && s.air ? airArc(s.pts[0], s.pts[s.pts.length - 1]) : s.pts; const r = trimFrom(pts, p); if (pathLen(r) > .9) out.push({...s, air:false, trimmed:true, pts:r}); }
+    if (s.type === 'arrow' && s.style === 'pass' && s.air){ out.push({...s, cut:p, trimmed:true}); continue; } /* stays an arc, eaten along its flight */
+    if (s.type === 'bank' && s.air){ out.push({...s, cut:p, trimmed:true}); continue; }
+    if (s.type === 'arrow'){ const r = trimFrom(s.pts, p); if (pathLen(r) > .9) out.push({...s, trimmed:true, pts:r}); }
     else if (s.type === 'bank'){ const r = trimFrom(passPts(s), p); if (pathLen(r) > .9) out.push({type:'arrow', style:'pass', trimmed:true, id:s.id, color:s.color, pts:r}); }
   }
   return out;
@@ -1468,7 +1473,7 @@ function saveLib(lib){ try { localStorage.setItem(LIB_KEY, JSON.stringify(lib));
 let saveTimer = 0;
 let launch = 'resume'; /* what opens on launch: 'resume' the last play, or a 'fresh' kickoff */
 function autosave(){ clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(CUR_KEY, JSON.stringify({doc, cur})); } catch {} }, 250); }
-function saveSettings(){ try { localStorage.setItem(SET_KEY, JSON.stringify({launch, penCfg, textCfg, pieceCfg, ov, speed, loop, soundOn, tool, color, passCfg, customColors, pitchCol:pitchCols['5v5'], pitchCols, viewId, viewFlip, libSort:LIB.sort, animMoves, hideTut, focusOn})); } catch {} }
+function saveSettings(){ try { localStorage.setItem(SET_KEY, JSON.stringify({launch, penCfg, textCfg, pieceCfg, ov, speed, loop, soundOn, tool, color, passCfg, customColors, pitchCol:pitchCols['5v5'], pitchCols, viewId, viewFlip, libSort:LIB.sort, animMoves, hideTut, focusOn, otsOn})); } catch {} }
 
 /* ---------- undo ---------- */
 function snapshot(){ undoStack.push(JSON.stringify({doc, cur})); if (undoStack.length > 150) undoStack.shift(); redoStack = []; syncUndo(); }
@@ -1488,7 +1493,7 @@ const I3 = [1,0,0, 0,1,0, 0,0,1];
 let Hfit = I3, Hf = I3, Hinv = I3, cam3 = null, q3d = 0;
 function p3(x, y, z){
   const c = cam3, dx = x - c.tx, dy = y - c.ty, rx = dx*c.cs - dy*c.sn, ry = dx*c.sn + dy*c.cs;
-  const w = c.D - c.st*ry - c.ct*z, u = c.D*rx/w, v = c.D*(c.ct*ry - c.st*z)/w, S = c.S;
+  const w = c.D - c.st*ry - c.ct*z, wc = Math.max(w, c.D*.03), u = c.D*rx/wc, v = c.D*(c.ct*ry - c.st*z)/wc, S = c.S;
   return {x:S[0]*u + S[1]*v + S[2], y:S[3]*u + S[4]*v + S[5], w};
 }
 /* local map at a point above the turf: lets the 2D drawing code paint on a raised surface */
@@ -1505,7 +1510,7 @@ function hull(pts){
   for (let i = pts.length - 1; i >= 0; i--){ const p = pts[i]; while (up.length >= 2 && cross(up[up.length-2], up[up.length-1], p) <= 0) up.pop(); up.push(p); }
   return lo.slice(0, -1).concat(up.slice(0, -1));
 }
-const path2 = (c, pts) => { c.beginPath(); pts.forEach((p, i) => c[i ? 'lineTo' : 'moveTo'](p.x, p.y)); c.closePath(); };
+const path2 = (c, pts) => { c.beginPath(); if (pts.length && pts.every(p => p.w !== undefined && p.w < .5)) return; pts.forEach((p, i) => c[i ? 'lineTo' : 'moveTo'](p.x, p.y)); c.closePath(); };
 let noPieceShadow = false, air3d = null;
 function hMul(A, B){ const r = []; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) r.push(A[i*3]*B[j] + A[i*3+1]*B[3+j] + A[i*3+2]*B[6+j]); return r; }
 function hInv(m){
@@ -1560,7 +1565,40 @@ function toScreen(p){ const q = hApply(Hf, p.x, p.y); return {x:q.x, y:q.y}; }
    cam.z zooms into the fitted view around cam.(cx, cy), a pitch point kept at the stage centre. */
 let cam = {z:1, cx:W/2, cy:H/2}, followBall = false, followId = 'ball', pan = null, pinch = null;
 const ZMAX = 6, pointers = new Map();
+/* Over-the-shoulder: during playback the camera rides behind the followed player, a little above head height,
+   looking where they are heading, like the in-game camera. */
+let otsOn = false, ots = null;
+const OTS = {tilt:76, h:3.6, back:5.4, fov:36, cy:.44};
+const otsActive = () => otsOn && anim.playing && followBall && followId !== 'ball' && !!piece(followId) && glReady();
+function otsUpdate(pos, snap){
+  const id = followId, q = pos[id]; if (!q) return;
+  if (!ots || ots.id !== id || snap){ const pc = piece(id), b = pos.ball, toward = b && dist(b, q) > 3 ? Math.atan2(b.y - q.y, b.x - q.x) : (pc.team === 'home' ? 0 : Math.PI);
+    ots = {id, x:q.x, y:q.y, h:toward}; }
+  const mo = anim.mo, d = mo && mo.dir && mo.dir[id], spd = mo && mo.spd ? mo.spd[id] || 0 : 0;
+  if (d != null && spd > 1.5) ots.h = lerpAng(ots.h, d, .06);
+  ots.x = q.x; ots.y = q.y;
+}
+function applyOTS(){
+  const th = OTS.tilt*Math.PI/180, D = OTS.h/Math.cos(th), fx = Math.cos(ots.h), fy = Math.sin(ots.h), ahead = D*Math.sin(th) - OTS.back;
+  const tx = ots.x + fx*ahead, ty = ots.y + fy*ahead, a = Math.atan2(-fx, -fy);
+  camv = {yaw:a*180/Math.PI, tilt:OTS.tilt, D, region:[tx - 1, ty - 1, tx + 1, ty + 1], ots:true};
+  const P = projH(camv), k = (base.w/2)/(D*Math.tan(OTS.fov*Math.PI/180)), S = [k, 0, base.w/2, 0, k, base.h*OTS.cy, 0, 0, 1];
+  Hfit = Hf = hMul(S, P); Hinv = hInv(Hf);
+  cam3 = {S, cs:Math.cos(a), sn:Math.sin(a), st:Math.sin(th), ct:Math.cos(th), D, tx, ty};
+  q3d = 1;
+}
+function endOTS(){ if (camv && camv.ots){ camv = viewParams(viewId, viewFlip); applyView(); } }
+/* the in-game crosshair: two small brackets just above the middle of the screen */
+function drawCrosshair(){
+  const c = ctx, x = base.w/2, y = base.h*.36, r = Math.max(9, base.w*.012);
+  c.save(); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.lineCap = 'round'; c.lineWidth = 2.2; c.strokeStyle = 'rgba(80,235,230,.95)'; c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 3;
+  c.beginPath(); c.arc(x + r*.55, y, r, Math.PI*.78, Math.PI*1.22); c.stroke();
+  c.beginPath(); c.arc(x - r*.55, y, r, -Math.PI*.22, Math.PI*.22); c.stroke();
+  c.restore();
+}
 function applyView(){
+  if (otsActive() && ots){ applyOTS(); syncZoomUI(); return; }
+  if (camv && camv.ots) camv = viewParams(viewId, viewFlip);
   if (!camv) camv = viewParams(viewId, viewFlip);
   const P = projH(camv), R = camv.region;
   const pts = [[R[0],R[1]], [R[2],R[1]], [R[2],R[3]], [R[0],R[3]]].map(([x, y]) => hApply(P, x, y));
@@ -1633,7 +1671,7 @@ function focusLayers(layers, ids){
   return out;
 }
 function followPt(pos){ return (followId !== 'ball' && pos[followId]) || pos.ball; }
-function followCam(pos){ if (!followBall || cam.z <= 1.001) return; const q = followPt(pos); if (!q) return; cam.cx += (q.x - cam.cx)*.14; cam.cy += (q.y - cam.cy)*.14; applyView(); }
+function followCam(pos){ if (otsActive()){ otsUpdate(pos); applyView(); return; } if (!followBall || cam.z <= 1.001) return; const q = followPt(pos); if (!q) return; cam.cx += (q.x - cam.cx)*.14; cam.cy += (q.y - cam.cy)*.14; applyView(); }
 function buildFollowOpts(){
   const sel = $('#zoomFollow'); if (!sel || !doc) return;
   const opts = [['', 'Follow: off'], ['ball', 'Follow ball']];
@@ -1648,6 +1686,7 @@ function syncZoomUI(){
   $('#zoomOut').disabled = cam.z <= 1.001; $('#zoomIn').disabled = cam.z >= ZMAX - .001;
   buildFollowOpts(); const fw = $('#followWrap'); if (fw) fw.setAttribute('aria-pressed', followBall);
   const fb = $('#focusBtn'); if (fb){ fb.setAttribute('aria-pressed', focusOn); fb.classList.toggle('dimmed', !(followBall && followId !== 'ball')); }
+  const ob = $('#otsBtn'); if (ob){ ob.setAttribute('aria-pressed', otsOn); ob.classList.toggle('dimmed', !(followBall && followId !== 'ball')); }
 }
 /* change camera view with a short eased move; everything is re-projected every frame on the way */
 function setView(id, flip, instant){
@@ -1707,7 +1746,7 @@ function groundScale(){
   for (const [x, y] of [[R[0],R[1]], [R[2],R[1]], [R[2],R[3]], [R[0],R[3]], [(R[0]+R[2])/2, (R[1]+R[3])/2]]){ const j = hJac(Hf, x, y); k = Math.max(k, Math.sqrt(Math.abs(j.a*j.d - j.b*j.c))); }
   /* stay inside the card's texture limit on both sides, and under ~9 million pixels */
   const cap = Math.max(4, Math.min(Math.floor(glCap/VW), Math.floor(glCap/VH), Math.floor(Math.sqrt(9e6/(VW*VH)))));
-  return clamp(Math.ceil(k*dpr), Math.min(6, cap), cap);
+  return clamp(Math.ceil(k*dpr), Math.min(6, cap), camv && camv.ots ? Math.min(cap, 14) : cap);
 }
 function glDraw(){
   const w = base.w, h = base.h, N = [2/w,0,-1, 0,-2/h,1, 0,0,1], C = hMul(N, Hf);
@@ -2005,6 +2044,16 @@ const DOTS = [.01, .66]; /* round-capped dots: passes are dotted, runs are solid
 /* aerial wall pass: lofted into the glass, drops to the target. Flat views curve each leg; tilted views fly it */
 function drawAirBank(c, s, b, k){
   const bp = b.pts, a = bp[0], q = bp[1], t = bp[bp.length - 1];
+  if (s.cut){ /* playing: only the legs still ahead of the ball, still in the air */
+    const hb = wallHeight(s, b), L = pathLen(bp) || 1; let acc = 0;
+    c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(k, .4); polyline(c, trimFrom(bp, s.cut)); c.stroke(); c.restore();
+    for (let i = 0; i < bp.length - 1; i++){ const l = Math.hypot(bp[i+1][0] - bp[i][0], bp[i+1][1] - bp[i][1]), c0 = acc/L, c1 = (acc + l)/L; acc += l;
+      if (s.cut >= c1) continue; const from = Math.max(0, (s.cut - c0)/((c1 - c0) || 1)), last = i === bp.length - 2;
+      if (air3d) air3d.push({a:bp[i], b:bp[i+1], za:i ? hb : 0, zb:last ? 0 : hb, from, color:k, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:last});
+      else { const arc = trimFrom(airArc(bp[i], bp[i+1]), from); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = k;
+        if (last){ polyline(c, trimEnd(arc, .85)); c.stroke(); arrowHead(c, arc, k); } else { polyline(c, arc); c.stroke(); } } }
+    return;
+  }
   const pos = scenePos || frame().pos, sf = sceneFrame || frame();
   const passer = players().find(p => dist(pos[p.id], P(a)) < REACH);
   const blk = liftBlocker(a, q, pos, sf, passer && passer.team), kk = blk ? '#ff5d5d' : k;
@@ -2047,6 +2096,13 @@ function drawShotLine(c, s, k){
 }
 function drawAirPass(c, s, k){
   const a = s.pts[0], b = s.pts[s.pts.length-1];
+  if (s.cut){ /* playing: what is left of the flight */
+    const kk = k, sh = trimFrom([a, b], s.cut);
+    c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(kk, .4); polyline(c, sh); c.stroke(); c.restore();
+    if (air3d) air3d.push({a, b, from:s.cut, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:true});
+    else { const arc = trimFrom(airArc(a, b), s.cut); polyline(c, trimEnd(arc, .85)); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = kk; c.stroke(); arrowHead(c, arc, kk, s.shot ? 1.8 : 1.4); }
+    return;
+  }
   const pos = scenePos || frame().pos, sf = sceneFrame || frame();
   const passer = players().find(p => dist(pos[p.id], P(a)) < REACH);
   const blk = liftBlocker(a, b, pos, sf, passer && passer.team);
@@ -2539,8 +2595,8 @@ function drawPiecesProjected(pos, kf, o){
   const hp = PUCK_H*q3d;
   noPieceShadow = true;
   const fid = focusId();
-  for (const {p} of list){
-    const q = pos[p.id];
+  for (const {p, w} of list){
+    const q = pos[p.id]; if (w < 3.2) continue; /* behind or right at the over-the-shoulder camera */
     ctx.globalAlpha = fid && p.team !== 'ball' && p.id !== fid ? FOCUS_DIM : 1;
     if (p.team === 'ball'){
       const z = BR + (o.ballZ || 0), g = j3(q.x, q.y, 0);
@@ -2603,6 +2659,10 @@ function partNear(pt){
 }
 function drawWall(pt, near){
   const hc = CURB_H*q3d, hg = WALL_H*q3d, P = (q, z) => p3(q[0], q[1], z);
+  if (camv && camv.ots){ /* riding along: keep only the part of the wall in front of the camera */
+    const wa = P(pt.a, 0).w, wb = P(pt.b, 0).w, lim = 1.5; if (wa < lim && wb < lim) return;
+    if (wa < lim || wb < lim){ const t = (lim - wa)/((wb - wa) || 1), m = [pt.a[0] + (pt.b[0] - pt.a[0])*t, pt.a[1] + (pt.b[1] - pt.a[1])*t];
+      pt = wa < lim ? {...pt, a:m} : {...pt, b:m}; } }
   const A0 = P(pt.a, 0), B0 = P(pt.b, 0), A1 = P(pt.a, hc), B1 = P(pt.b, hc);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   /* the curb: low and solid, with the white boundary line along its top */
@@ -2623,6 +2683,7 @@ function drawGlassCorners(near){
   const poly = courtPoly(e), defs = wallDefs(), ids = mapWalls(), C = camGround();
   for (let i = 0; i < poly.length; i++){
     const [x, y] = poly[i], a = p3(x, y, CURB_H*q3d), b = p3(x, y, WALL_H*q3d), w1 = defs[ids[i]], w0 = defs[ids[(i + ids.length - 1) % ids.length]];
+    if (a.w < 1 || b.w < 1) continue;
     const side = w => (C.x - x)*w.n[0] + (C.y - y)*w.n[1] >= 0;
     const behind = side(w0) && side(w1); /* camera on the pitch side of both walls */
     if (behind === near) continue;
@@ -2631,6 +2692,7 @@ function drawGlassCorners(near){
 }
 function drawGoal3D(side, near){
   const gx = side === 'home' ? 0 : W, back = side === 'home' ? -GOAL_D : W + GOAL_D, h = GOAL_H*q3d, hb = h*.8, k = doc.teams[side].color;
+  if ([GY0, GY1].some(y => p3(gx, y, 0).w < 1 || p3(back, y, 0).w < 1)) return; /* behind the over-the-shoulder camera */
   const P = (x, y, z) => p3(x, y, z);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const net = rgba(k, near ? .16 : .3), mesh = rgba('#ffffff', near ? .18 : .32);
@@ -2665,11 +2727,13 @@ function draw3DArcs(list){
   for (const s of list){
     const [ax, ay] = s.a, [bx, by] = s.b, L = Math.hypot(bx - ax, by - ay) || 1, nx = (by - ay)/L, ny = -(bx - ax)/L;
     const bul = Math.min(L*.14, 4.5)*(1 - q3d), hz = clamp(L*.12, 2, 6)*q3d, za = (s.za || 0)*q3d, zb = (s.zb || 0)*q3d, pts = [];
-    for (let i = 0; i <= 32; i++){ const t = i/32, f = 4*t*(1 - t); pts.push(p3(ax + (bx - ax)*t + nx*bul*f, ay + (by - ay)*t + ny*bul*f, za + (zb - za)*t + hz*f)); }
+    const t0 = s.from || 0;
+    for (let i = 0; i <= 32; i++){ const t = t0 + (1 - t0)*i/32, f = 4*t*(1 - t); pts.push(p3(ax + (bx - ax)*t + nx*bul*f, ay + (by - ay)*t + ny*bul*f, za + (zb - za)*t + hz*f)); }
+    if (pts.some(q => q.w < 1)) continue; /* behind the over-the-shoulder camera */
     const mj = j3((ax + bx)/2, (ay + by)/2, hz), k = Math.sqrt(Math.abs(mj.a*mj.d - mj.b*mj.c));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = s.alpha; ctx.lineCap = 'round';
     /* faint drop lines show how high the ball is */
-    if (q3d > .2){ ctx.strokeStyle = rgba('#ffffff', .18); ctx.lineWidth = 1; ctx.beginPath();
+    if (q3d > .2 && !t0){ ctx.strokeStyle = rgba('#ffffff', .18); ctx.lineWidth = 1; ctx.beginPath();
       for (const t of [.25, .5, .75]){ const f = 4*t*(1 - t), g = p3(ax + (bx - ax)*t + nx*bul*f, ay + (by - ay)*t + ny*bul*f, 0), u = pts[Math.round(t*32)]; ctx.moveTo(g.x, g.y); ctx.lineTo(u.x, u.y); }
       ctx.stroke(); }
     const end = s.head ? 26 : 32;
@@ -2703,7 +2767,7 @@ function renderFrame(pos, layers, o){
   glDraw(); glc.style.visibility = 'visible';
   drawArena3D(false);
   for (const t of texts){ /* ground labels, upright, at their projected spot */
-    const j = hJac(Hf, t.x, t.y), k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c));
+    const j = hJac(Hf, t.x, t.y), k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c)); if (j.w < .5) continue;
     ctx.globalAlpha = t.alpha; ctx.setTransform(dpr*k, 0, 0, dpr*k, dpr*j.x, dpr*j.y);
     fieldText(ctx, t.txt, 0, 0, t.size, t.fill, t.font, t.halo, t.align, t.box);
   }
@@ -2942,9 +3006,10 @@ function startPlay(){
   if (cur >= doc.frames.length - 1) cur = 0;
   anim.playing = true; anim.phase = 'hold'; anim.t0 = performance.now() - holdDur()*.6;
   resetStride(); anim.kicks = []; scheduleKicks(cur + 1, anim.t0 + holdDur());
+  if (otsActive()){ otsUpdate(frame().pos, true); applyView(); }
   syncPlayBtn(); renderTimeline(); updateCaption(); anim.raf = requestAnimationFrame(tick);
 }
-function stopPlay(){ if (!anim.playing) return; anim.playing = false; anim.kicks = []; anim.phase = 'idle'; cancelAnimationFrame(anim.raf); syncPlayBtn(); renderTimeline(); updateCaption(); draw(); }
+function stopPlay(){ if (!anim.playing) return; anim.playing = false; anim.kicks = []; endOTS(); anim.phase = 'idle'; cancelAnimationFrame(anim.raf); syncPlayBtn(); renderTimeline(); updateCaption(); draw(); }
 function tick(now){
   if (!anim.playing) return;
   if (anim.phase === 'move'){
@@ -2991,7 +3056,7 @@ function drawTween(t){
   const ballZ = (fb.ballPass && fb.ballAir && isPersp()) ? air3dBall(fa, fb, t, pos) : 0;
   motionNow = buildMotion(pos, performance.now(), {fly:!!fb.ballPass && t < .98, ee:fa, t});
   try { renderFrame(pos, [{shapes:fa.shapes, alpha:Math.max(0, 1 - t*1.8)}, {shapes:fb.shapes, alpha:Math.max(0, (t - .55)/.45)}], {eeFrame:fa, keeperFrame: t < .5 ? fa : fb, ballLocked, ballLift:ballLift*(1 - (isPersp() ? q3d : 0)), ballZ}); } finally { motionNow = null; }
-  drawMini(pos);
+  if (camv && camv.ots) drawCrosshair(); else drawMini(pos);
 }
 /* combo step: passes go off one after another, each with its own kick sound and height */
 function drawTweenTL(fa, fb, t){
@@ -3017,7 +3082,7 @@ function drawTweenTL(fa, fb, t){
   motionNow = buildMotion(pos, performance.now(), {fly:!!(b && b.k === 'fly' && t <= b.t1), ee:fa, t, tl});
   const prog = shapeProgress(tl, t), moving = fa.shapes.filter(s => prog[s.id] != null), still = fa.shapes.filter(s => prog[s.id] == null);
   try { renderFrame(pos, [{shapes:eatenShapes(moving, prog), alpha:1}, {shapes:still, alpha:Math.max(0, 1 - Math.max(0, t - .8)*5)}, {shapes:fb.shapes, alpha:Math.max(0, (t - .85)/.15)}], {eeFrame:fa, keeperFrame: t < .5 ? fa : fb, ballLocked, ballLift:ballLift*(1 - (isPersp() ? q3d : 0)), ballZ}); } finally { motionNow = null; }
-  drawMini(pos);
+  if (camv && camv.ots) drawCrosshair(); else drawMini(pos);
 }
 function syncPlayBtn(){
   const icon = anim.playing ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>' : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>';
@@ -3038,9 +3103,10 @@ function draw(){
   if (doc && docMap(doc) !== mapId) applyMap(docMap(doc));
   if (!doc || anim.playing && anim.phase === 'move') return;
   const f = frame();
+  if (otsActive()){ otsUpdate(f.pos); applyView(); } else if (camv && camv.ots) endOTS();
   if (anim.playing && kicksLive(performance.now())) motionNow = buildMotion(f.pos, performance.now(), null);
   let res; try { res = renderFrame(f.pos, [{shapes:f.shapes, alpha:1}], {eeFrame:anim.playing ? null : undefined, sel, draft, trails:trailInfo(), handleId, runReach: draft && draft.runner ? draft.runner : (tool === 'run' && !draft && hoverId ? hoverId : null), active: drag && drag.kind === 'piece' && drag.moved ? drag.id : null, after: (ruler || diveDraft) ? (c => { if (ruler) drawRuler(c); const ds = diveDraft && diveShapeFrom(diveDraft); if (ds) drawShape(c, ds, .85, false); }) : null}); } finally { motionNow = null; }
-  drawMini(f.pos);
+  if (camv && camv.ots) drawCrosshair(); else drawMini(f.pos);
   updateStats(f.pos, res.lanes, res.shots);
   if (coop.on) drawCursors();
 }
@@ -4487,6 +4553,8 @@ $('#zoomOut').addEventListener('click', () => zoomStep(-1));
 $('#zoomPct').addEventListener('click', zoomFit);
 $('#zoomFollow').addEventListener('change', e => { const v = e.target.value; if (!v) setFollow(false); else setFollow(true, v); e.target.blur(); });
 for (const ev of ['focus', 'pointerdown']) $('#zoomFollow').addEventListener(ev, buildFollowOpts);
+$('#otsBtn').addEventListener('click', () => { otsOn = !otsOn; saveSettings(); syncZoomUI(); if (!otsOn) endOTS();
+  toast(otsOn ? (followBall && followId !== 'ball' ? 'Over-the-shoulder on: press Space to ride along behind them.' : 'Over-the-shoulder on. Pick a player in Follow (1–0), then play.') : 'Over-the-shoulder off.'); });
 $('#focusBtn').addEventListener('click', () => { focusOn = !focusOn; saveSettings(); syncZoomUI(); redraw();
   toast(focusOn ? (followBall && followId !== 'ball' ? 'Focus on: everyone else dims during playback.' : 'Focus on. Pick a player in Follow to focus on them during playback.') : 'Focus off.'); });
 $('#fsBtn').addEventListener('click', () => {
@@ -5056,7 +5124,7 @@ function panelInit(){
 
 /* ---------- boot ---------- */
 function boot(){
-  try { const s = JSON.parse(localStorage.getItem(SET_KEY)); if (s){ if (s.launch === 'fresh') launch = 'fresh'; if (s.libSort === 'az') LIB.sort = 'az'; if (s.textCfg && TEXT_S[s.textCfg.s]) textCfg = {s:s.textCfg.s, box:!!s.textCfg.box, clear:!!s.textCfg.clear}; if (s.penCfg && PEN_W[s.penCfg.w]) penCfg = {w:s.penCfg.w, dots:!!s.penCfg.dots, clear:!!s.penCfg.clear}; ov = {...ov, ...s.ov}; speed = s.speed || 1; loop = !!s.loop; soundOn = s.soundOn !== false; animMoves = s.animMoves !== false; hideTut = !!s.hideTut; focusOn = !!s.focusOn; if (VIEWS[s.viewId]) viewId = s.viewId; viewFlip = !!s.viewFlip; color = s.color || color; tool = s.tool === 'air' ? 'pass' : s.tool || tool; if (s.passCfg && isFinite(s.passCfg.noTouch)) passCfg.noTouch = s.passCfg.noTouch; if (s.passCfg && isFinite(s.passCfg.lift)) passCfg.lift = s.passCfg.lift; if (s.passCfg){ passCfg.runSame = !!s.passCfg.runSame; if (isFinite(s.passCfg.eeAdd) && s.passCfg.eeV === 4) passCfg.eeAdd = s.passCfg.eeAdd; /* older saves used a percentage */ } if (Array.isArray(s.customColors)) customColors = s.customColors.slice(0, 4); if (s.pieceCfg){ if (BALLS.some(b => b.id === s.pieceCfg.ball)) pieceCfg.ball = s.pieceCfg.ball; pieceCfg.figures = !!s.pieceCfg.figures; } if (s.pitchCol && s.pitchCol.L) pitchCols['5v5'] = pitchCol = withMids(s.pitchCol); if (s.pitchCols && s.pitchCols['1v1'] && s.pitchCols['1v1'].L) pitchCols['1v1'] = withMids(s.pitchCols['1v1']); } } catch {}
+  try { const s = JSON.parse(localStorage.getItem(SET_KEY)); if (s){ if (s.launch === 'fresh') launch = 'fresh'; if (s.libSort === 'az') LIB.sort = 'az'; if (s.textCfg && TEXT_S[s.textCfg.s]) textCfg = {s:s.textCfg.s, box:!!s.textCfg.box, clear:!!s.textCfg.clear}; if (s.penCfg && PEN_W[s.penCfg.w]) penCfg = {w:s.penCfg.w, dots:!!s.penCfg.dots, clear:!!s.penCfg.clear}; ov = {...ov, ...s.ov}; speed = s.speed || 1; loop = !!s.loop; soundOn = s.soundOn !== false; animMoves = s.animMoves !== false; hideTut = !!s.hideTut; focusOn = !!s.focusOn; otsOn = !!s.otsOn; if (VIEWS[s.viewId]) viewId = s.viewId; viewFlip = !!s.viewFlip; color = s.color || color; tool = s.tool === 'air' ? 'pass' : s.tool || tool; if (s.passCfg && isFinite(s.passCfg.noTouch)) passCfg.noTouch = s.passCfg.noTouch; if (s.passCfg && isFinite(s.passCfg.lift)) passCfg.lift = s.passCfg.lift; if (s.passCfg){ passCfg.runSame = !!s.passCfg.runSame; if (isFinite(s.passCfg.eeAdd) && s.passCfg.eeV === 4) passCfg.eeAdd = s.passCfg.eeAdd; /* older saves used a percentage */ } if (Array.isArray(s.customColors)) customColors = s.customColors.slice(0, 4); if (s.pieceCfg){ if (BALLS.some(b => b.id === s.pieceCfg.ball)) pieceCfg.ball = s.pieceCfg.ball; pieceCfg.figures = !!s.pieceCfg.figures; } if (s.pitchCol && s.pitchCol.L) pitchCols['5v5'] = pitchCol = withMids(s.pitchCol); if (s.pitchCols && s.pitchCols['1v1'] && s.pitchCols['1v1'].L) pitchCols['1v1'] = withMids(s.pitchCols['1v1']); } } catch {}
   let saved = null; try { saved = JSON.parse(localStorage.getItem(CUR_KEY)); } catch {}
   /* the old example play moved to the Tutorial row: drop the copy that used to be seeded into the library */
   try { if (!localStorage.getItem(TUT_KEY)){ localStorage.setItem(TUT_KEY, '1'); localStorage.setItem(SEED_KEY, '1');
