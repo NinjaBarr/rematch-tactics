@@ -1573,6 +1573,7 @@ let otsOn = false, ots = null, otsLook = null;
    Aim is in degrees below level: 4 is the default look, 18 is the lowest the game allows, negatives look up. */
 const OTS = {arm:5.5, pivot:1.6, side:.6, fov:90, aim:4, aimDown:21.5, aimUp:-20, minH:.45};
 /* in-game players are ~1.9 units tall; the board's figures are drawn bigger so they read from above */
+const OTS_BR = .17; /* in-game ball radius next to a ~1.9-unit player */
 const figK = () => camv && camv.ots ? .76 : 1;
 const otsActive = () => otsOn && anim.playing && followBall && followId !== 'ball' && !!piece(followId) && glReady();
 function otsUpdate(pos, snap){
@@ -2801,16 +2802,22 @@ function drawPiecesProjected(pos, kf, o){
     const q = pos[p.id]; if (w < 3.2) continue; /* behind or right at the over-the-shoulder camera */
     ctx.globalAlpha = fid && p.team !== 'ball' && p.id !== fid ? FOCUS_DIM : 1;
     if (p.team === 'ball'){
-      const z = BR + (o.ballZ || 0), g = j3(q.x, q.y, 0);
-      setJ(g); ctx.beginPath(); ctx.ellipse(.15, .1, BR*(1 + (o.ballZ || 0)*.08), BR*.95*(1 + (o.ballZ || 0)*.08), 0, 0, Math.PI*2); ctx.fillStyle = `rgba(0,0,0,${clamp(.38 - (o.ballZ || 0)*.05, .12, .38)})`; ctx.fill();
-      const j = j3(q.x, q.y, z); let k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c));
-      ballTrailPush(q.x, q.y, z); drawBallTrail(k);
+      /* over-the-shoulder shows the ball at its in-game size (about a sixth of a player's height) and, when someone has it,
+         right at their feet instead of out past the board token */
+      const ots3 = !!(camv && camv.ots), br = ots3 ? OTS_BR : BR, sc = br/BR; let bq = q;
+      if (ots3 && (o.ballZ || 0) < .3){ let best = null, bd = 2.6;
+        for (const pc of doc.pieces) if (pc.team !== 'ball' && doc.show[pc.team] && pos[pc.id]){ const dd = dist(pos[pc.id], q); if (dd < bd){ bd = dd; best = pos[pc.id]; } }
+        if (best && bd > .01){ const nd = bd <= 1.6 ? .55 : .55 + (bd - 1.6)*2.05; bq = {x:best.x + (q.x - best.x)*nd/bd, y:best.y + (q.y - best.y)*nd/bd}; } }
+      const z = br + (o.ballZ || 0), g = j3(bq.x, bq.y, 0);
+      setJ(g); ctx.beginPath(); ctx.ellipse(.15*sc, .1*sc, br*(1 + (o.ballZ || 0)*.08), br*.95*(1 + (o.ballZ || 0)*.08), 0, 0, Math.PI*2); ctx.fillStyle = `rgba(0,0,0,${clamp(.38 - (o.ballZ || 0)*.05, .12, .38)})`; ctx.fill();
+      const j = j3(bq.x, bq.y, z); let k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c))*sc;
+      ballTrailPush(bq.x, bq.y, z); drawBallTrail(k);
       ctx.globalAlpha = 1;
-      if (camv && camv.ots){ /* like the game: the ball never shrinks below a few pixels, and a white ring keeps it findable far away */
+      if (ots3){ /* like the game: the ball never shrinks below a few pixels, and a white ring keeps it findable far away */
         const rpx = BR*k, ringR = Math.max(rpx*1.45, 9);
-        if (rpx < 14){ ctx.setTransform(dpr, 0, 0, dpr, dpr*j.x, dpr*j.y); ctx.beginPath(); ctx.arc(0, 0, ringR, 0, Math.PI*2);
-          ctx.lineWidth = 2.4; ctx.strokeStyle = `rgba(255,255,255,${clamp((14 - rpx)/8, 0, .9)})`; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3; ctx.stroke(); ctx.shadowBlur = 0; }
-        k = Math.max(k, 4.2/BR); }
+        if (rpx < 6.5){ ctx.setTransform(dpr, 0, 0, dpr, dpr*j.x, dpr*j.y); ctx.beginPath(); ctx.arc(0, 0, ringR, 0, Math.PI*2);
+          ctx.lineWidth = 2.4; ctx.strokeStyle = `rgba(255,255,255,${clamp((6.5 - rpx)/3, 0, .9)})`; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3; ctx.stroke(); ctx.shadowBlur = 0; }
+        k = Math.max(k, 3.5/BR); }
       ctx.setTransform(dpr*k, 0, 0, dpr*k, dpr*j.x, dpr*j.y);
       drawBall(ctx, {x:0, y:0}, o.ballLocked, o.ballLift, (q.x + q.y)*.6);
       continue;
