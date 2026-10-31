@@ -102,6 +102,8 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .cm-colors{display:flex;flex-wrap:wrap;gap:6px;padding:4px 6px 6px;max-width:210px}
 .cm-colors .swatch{width:20px;height:20px;margin:0;border-width:2px}
 .cm-colors .custom-color{width:20px;height:20px}
+.cm-range{display:flex;flex-direction:column;gap:4px;padding:6px 10px 8px;font-size:12px;color:var(--muted)}
+.cm-range input{width:100%;accent-color:var(--accent)}
 .cm-seg{display:flex;gap:2px;padding:2px;margin:2px 4px 4px;background:var(--bg);border-radius:7px}
 .cm-seg button{flex:1;height:26px;border:0;border-radius:5px;background:none;font-size:12.5px;color:var(--muted)}
 .cm-seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg);font-weight:600}
@@ -547,9 +549,9 @@ body.clean .touchbar{display:none}
           <button class="btn icon" id="viewFlip" title="Flip ends" aria-label="Flip ends" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9a8 8 0 0 1 14-3l2 2"/><path d="M20 3v5h-5"/><path d="M20 15a8 8 0 0 1-14 3l-2-2"/><path d="M4 21v-5h5"/></svg></button>
         </div>
         <button class="btn icon" id="zoomOut" title="Zoom out (-)" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12"/></svg></button>
-        <button class="btn zpct" id="zoomPct" title="Fit the whole pitch (0)">100%</button>
+        <button class="btn zpct" id="zoomPct" title="Fit the whole pitch (Shift+0)">100%</button>
         <button class="btn icon" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button>
-        <label class="btn follow" id="followWrap" title="Keep the camera on the ball or one player during playback (K: ball on/off)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg><select id="zoomFollow" aria-label="Camera follows"><option value="">Follow: off</option><option value="ball">Follow ball</option></select></label>
+        <label class="btn follow" id="followWrap" title="Keep the camera on the ball or one player during playback (` ball, 1–5 home, 6–0 away; K ball on/off)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg><select id="zoomFollow" aria-label="Camera follows"><option value="">Follow: off</option><option value="ball">Follow ball</option></select></label>
         <button class="btn icon" id="focusBtn" aria-pressed="false" title="Focus: dim everyone else while you follow a player" aria-label="Focus on the followed player"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
       </div>
       <div class="touchbar" id="touchbar" role="toolbar" aria-label="Drawing options" hidden></div>
@@ -749,7 +751,6 @@ const TOOLS = [
   {id:'run', key:'R', name:'Run', svg:'<path d="M4 19c4-1 9-6 12-12"/><path d="M11 6.5 16.5 6 17 11.5"/>'},
   {id:'pass', key:'P', name:'Pass', svg:'<path d="M4 19 17.5 6.5" stroke-dasharray="0.1 3.4" stroke-width="2.6"/><path d="M11 6h7v7"/>'},
   {id:'shot', key:'J', name:'Shot', svg:'<path d="M3.5 20.5 16 8" stroke-width="2.6"/><path d="M6.5 13.5l3 3M9.5 10.5l3 3" stroke-width="1.6"/><path d="M12.5 5.5h7v7"/>'},
-  {id:'air', key:'I', name:'Aerial pass', svg:'<path d="M3 19C6 7 13 4 19 7" stroke-dasharray="0.1 3.4" stroke-width="2.6"/><path d="M14.5 4.5 19.5 7l-2.2 4.8"/><path d="M3 21h17" stroke-dasharray="2 2"/>'},
   {id:'dribble', key:'D', name:'Dribble', svg:'<path d="M3 17c1.6-2.6 3.2.6 4.8-2s3.2.6 4.8-2 3.2.6 4.8-2"/><path d="M14.5 6.5h5v5"/>'},
   {id:'bank', key:'B', name:'Wall pass', svg:'<path d="M4 5l7.5 12L19 6"/><path d="M14.5 5.5 19 6l.5 4.5"/><path d="M2.5 20.5h19" stroke-width="2.4"/>'},
   {id:'zone', key:'Z', name:'Zone', svg:'<rect x="4" y="6" width="16" height="12" rx="1.5" stroke-dasharray="3 2.2"/>'},
@@ -1058,7 +1059,29 @@ function bankReaim(){ if (!draft || draft.type !== 'bank2' || draft.stage !== 2)
 function bankDraftShape(d){ const ws = (d.chain || []).map(c => c.wall).concat([d.wall]);
   const sh = {type:'bank', a:r2(d.a), t:r2(d.t), wall:ws[0], color:d.color}; if (ws.length > 1) sh.walls = ws; if (d.air){ sh.air = true; sh.recv = 'control'; } return sh; }
 /* bounce height on the glass: just over a player for an aerial wall pass, over the crossbar when it plays off the glass above a goal */
-const bankHb = b => b.overGoal ? GOAL_H + .9 : 2.2;
+const bankHb = b => b.overGoal ? GOAL_H + .9 : 2.2; /* old fixed heights; aerial wall passes now use wallReach/wallHeight */
+/* Lofted ball, no drag: speed v (units/s) and a gravity that gives the game's max range at 45° (R = v²/g).
+   Shots: 33.4 u/s, range 60. Passes/lobs: tap-pass speed, range 55 (estimate). A player can aim at most 45° up,
+   so at distance d the highest the ball can be is d·(1 − d/R). */
+const loftOf = s => s && s.shot ? {v:SPEED.shot, R:PASS_RANGES[0].r} : {v:SPEED.pass, R:PASS_RANGES[1].r};
+function wallReach(s, b){
+  const bp = b.pts, d = Math.hypot(bp[1][0] - bp[0][0], bp[1][1] - bp[0][1]), {R} = loftOf(s);
+  const hMax = Math.min(WALL_H - .5, d < R ? d*(1 - d/R) : 0), hMin = b.overGoal ? GOAL_H + .45 : .6;
+  return {d, hMin, hMax:Math.max(hMin, hMax), ok:hMax >= hMin};
+}
+function wallHeight(s, b){
+  const w = wallReach(s, b);
+  const f = s && typeof s.hfrac === 'number' ? s.hfrac : null;
+  if (f == null) return clamp(b.overGoal ? GOAL_H + .9 : 2.2, w.hMin, w.hMax); /* older plays keep their height */
+  return w.hMin + clamp(f, 0, 1)*(w.hMax - w.hMin);
+}
+/* horizontal speed of a lofted ball that meets the wall at height h after d units (the flatter of the two aims) */
+function loftSpeed(s, d, h){
+  const {v, R} = loftOf(s), g = v*v/R, a = g*d*d/(2*v*v), disc = d*d - 4*a*(h + a);
+  const T = disc >= 0 && a > 1e-6 ? (d - Math.sqrt(disc))/(2*a) : 1; /* tan of the launch angle; at the limit it is 45° */
+  return v/Math.sqrt(1 + Math.min(1, Math.max(0, T))**2);
+}
+const toM = u => u/UNITS_PER_M;
 
 /* Keeper role, per REMATCH. Re-evaluated from where everyone stands every time anyone moves:
    - A keeper inside their own penalty box is GK and keeps it.
@@ -1227,7 +1250,7 @@ function planCombo(f, pl, carrier, nearest){
   for (const q of plan){
     const prevQ = plan[plan.indexOf(q) - 1], settle = prevQ && prevQ.air && prevQ.recv === q.passer && prevQ.k === q.j && (prevQ.s.recv || 'control') !== 'volley' ? .18 : 0;
     const sMin = (q.passer ? runTo(q.passer, q.j) : 0) + settle;
-    const pd = Math.max(.08, pathLen(q.pts)/(q.air ? SPD.air : (!q.dive && goalAt(q.pts[q.pts.length - 1])) || q.shot || q.s.shot ? SPD.shot : SPD.pass));
+    const pd = Math.max(.08, pathLen(q.pts)/(q.air && q.s.shot ? SPD.shot : q.s.type === 'bank' && q.s.air ? (() => { const bb = bankOf(q.s); return bb.ok ? loftSpeed(q.s, wallReach(q.s, bb).d, wallHeight(q.s, bb)) : SPD.air; })() : q.air ? SPD.air : (!q.dive && goalAt(q.pts[q.pts.length - 1])) || q.shot || q.s.shot ? SPD.shot : SPD.pass));
     let m = sMin + pd;
     if (q.dive){ /* the keeper times the jump to meet the ball; the shot is never held back for them */
       const g = L[q.recv][0]; g.t1 = m; g.t0 = Math.max(ct[q.recv] || 0, m - g.d); ci[q.recv] = 1; ct[q.recv] = m;
@@ -1279,7 +1302,7 @@ function planCombo(f, pl, carrier, nearest){
       else if (q.recv){ const rp = at(q.recv, t1), d = endDir(q.pts), sg2 = q.self ? 1 : -1; E = {x:rp.x + sg2*d.x*FOOT, y:rp.y + sg2*d.y*FOOT}; }
       const into = !q.dive && goalAt(q.pts[q.pts.length - 1]); if (into) E = {x:into.x, y:into.y};
       const pts = q.air ? airArc([S.x, S.y], [E.x, E.y]) : [[S.x, S.y], ...q.pts.slice(1, -1), [E.x, E.y]];
-      tl.ball.push({k:'fly', lin:1, sid:q.s.id || null, strike:!!q.s.shot, bankAir:q.s.type === 'bank' && q.s.air ? bankHb(bankOf(q.s)) : null, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
+      tl.ball.push({k:'fly', lin:1, sid:q.s.id || null, strike:!!q.s.shot, bankAir:q.s.type === 'bank' && q.s.air ? wallHeight(q.s, bankOf(q.s)) : null, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
       lastBall = E;
     }
   }
@@ -1394,7 +1417,7 @@ function buildNextFrame(d, idx){
     paths.ball = s.air && s.type !== 'bank' ? airArc([f.pos.ball.x, f.pos.ball.y], [bp.x, bp.y]) : [[f.pos.ball.x, f.pos.ball.y], ...pts.slice(1, -1), [bp.x, bp.y]];
     ballMoved = true; passMoved = true; if (s.air){ ballAir = true; recvMode = s.recv || 'control'; }
     if (s.type === 'bank'){ const bb = bankOf(s); if (bb.ok){ const T = pathLen(paths.ball) || 1, st = [[f.pos.ball.x, f.pos.ball.y]];
-      bounceList = bb.bounces.map(q => { st.push(q); return pathLen(st)/T; }); bounceAt = bounceList[0]; if (s.air) bankHeight = bankHb(bb); } }
+      bounceList = bb.bounces.map(q => { st.push(q); return pathLen(st)/T; }); bounceAt = bounceList[0]; if (s.air) bankHeight = wallHeight(s, bb); } }
   }
   for (const id in pos){ pos[id].x = Math.round(pos[id].x*100)/100; pos[id].y = Math.round(pos[id].y*100)/100; }
   doc = prevDoc;
@@ -1989,22 +2012,23 @@ function drawAirBank(c, s, b, k){
   const pre = prefixPath([a, q], passCfg.lift);
   c.lineCap = 'round'; polyline(c, pre.pts); c.lineWidth = .7; c.strokeStyle = blk ? 'rgba(255,93,93,.45)' : 'rgba(255,255,255,.22)'; c.stroke();
   c.restore();
-  const hb = bankHb(b);
+  const hb = wallHeight(s, b);
   if (air3d){
     drawNoTouch(c, [a, q]);
     for (let i = 0; i < bp.length - 1; i++){ const last = i === bp.length - 2;
-      air3d.push({a:bp[i], b:bp[i+1], za:i ? hb : 0, zb:last ? 0 : hb, color:kk, alpha:c.globalAlpha, dots:true, head:last}); }
+      air3d.push({a:bp[i], b:bp[i+1], za:i ? hb : 0, zb:last ? 0 : hb, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:last}); }
   } else {
     c.setLineDash(DOTS); c.lineWidth = .42; c.strokeStyle = kk;
     for (let i = 0; i < bp.length - 1; i++){ const last = i === bp.length - 2, l = airArc(bp[i], bp[i+1]);
       if (!i) drawNoTouch(c, l);
-      c.setLineDash(DOTS); c.lineWidth = .42; c.strokeStyle = kk;
+      c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = kk;
       if (last){ polyline(c, trimEnd(l, .85)); c.stroke(); arrowHead(c, l, kk); } else { polyline(c, l); c.stroke(); } }
   }
   c.save(); c.setLineDash([]); c.lineWidth = .28; c.strokeStyle = kk;
   for (const [bx, by] of b.bounces) for (let i = 0; i < 6; i++){ const an = i*Math.PI/3 + Math.PI/6; c.beginPath(); c.moveTo(bx + Math.cos(an)*.7, by + Math.sin(an)*.7); c.lineTo(bx + Math.cos(an)*1.5, by + Math.sin(an)*1.5); c.stroke(); }
   c.restore();
-  if (b.overGoal){ const g = b.bounces.find(([, y]) => y > GY0 - .5 && y < GY1 + .5) || q; fieldText(c, 'OFF THE GLASS', g[0] + (g[0] < W/2 ? 3.4 : -3.4), g[1] - 2.2, .95, '#ffffff'); }
+  { const w = wallReach(s, b), g0 = b.bounces[0] || q, tx = g0[0] + (g0[0] < 3 ? 3.6 : g0[0] > W - 3 ? -3.6 : 0), ty = g0[1] + (g0[1] < 3 ? 2.4 : g0[1] > H - 3 ? -2.4 : 0);
+    fieldText(c, w.ok ? `${b.overGoal ? 'OFF THE GLASS · ' : ''}${toM(hb).toFixed(1)} m UP` : 'TOO FAR TO LOFT', tx, ty, .95, w.ok ? '#ffffff' : '#ff5d5d'); }
   const d = endDir([bp[bp.length - 2], t]);
   const contested = !blk && passer && markerNear(P(t), passer.team, pos);
   const tag = blk ? 'BLOCKED ON LIFT' : contested ? 'CONTESTED' : (s.recv === 'volley' ? 'VOLLEY' : 'CONTROL');
@@ -2032,15 +2056,15 @@ function drawAirPass(c, s, k){
   const pre = prefixPath([a, b], passCfg.lift);
   c.setLineDash([]); c.lineCap = 'round'; polyline(c, pre.pts); c.lineWidth = .7; c.strokeStyle = blk ? 'rgba(255,93,93,.45)' : 'rgba(255,255,255,.22)'; c.stroke();
   c.restore();
-  if (air3d){ drawNoTouch(c, [a, b]); air3d.push({a, b, color:kk, alpha:c.globalAlpha, dots:true, head:true}); }
+  if (air3d){ drawNoTouch(c, [a, b]); air3d.push({a, b, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:true}); }
   else {
     const arc = airArc(a, b);
     drawNoTouch(c, arc);
-    polyline(c, trimEnd(arc, .85)); c.setLineDash(DOTS); c.lineWidth = .42; c.strokeStyle = kk; c.stroke(); arrowHead(c, arc, kk);
+    polyline(c, trimEnd(arc, .85)); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = kk; c.stroke(); arrowHead(c, arc, kk, s.shot ? 1.8 : 1.4);
   }
   const d = endDir([a, b]);
   const contested = !blk && passer && markerNear(P(b), passer.team, pos);
-  const tag = blk ? 'BLOCKED ON LIFT' : contested ? 'CONTESTED' : (s.recv === 'volley' ? 'VOLLEY' : 'CONTROL');
+  const tag = blk ? 'BLOCKED ON LIFT' : contested ? 'CONTESTED' : s.shot ? 'AERIAL SHOT' : (s.recv === 'volley' ? 'VOLLEY' : 'CONTROL');
   fieldText(c, tag, b[0] + d.x*2.4, b[1] + d.y*2.4 - .2, 1, blk ? '#ff5d5d' : contested ? '#f2b33d' : '#ffffff');
 }
 
@@ -2157,6 +2181,7 @@ function drawShape(c, s, alpha, selected){
     case 'pen': { const w = penWidth(s); polyline(c, s.pts); c.lineWidth = w; c.strokeStyle = s.clear ? rgba(k, .42) : k;
       if (s.dots) c.setLineDash([.01, w*2.3 + .25]); c.stroke(); c.setLineDash([]); break; }
     case 'arrow': {
+      if (s.style === 'pass' && s.shot && s.air){ drawAirPass(c, s, k); break; }
       if (s.style === 'pass' && s.shot){ drawShotLine(c, s, k); break; }
       if (s.style === 'pass' && s.air){ drawAirPass(c, s, k); break; }
       if (s.style === 'run' && passCfg.runSame){ const f = sceneFrame || frame(), lim = runLimitS(s, f);
@@ -2178,8 +2203,9 @@ function drawShape(c, s, alpha, selected){
         fieldText(c, s.air ? 'NO WALL ANGLE · PRESS W' : 'NO WALL ANGLE · PRESS W OR LOFT IT', (s.a[0] + s.t[0])/2, (s.a[1] + s.t[1])/2 - 2, 1.8, '#ff5d5d'); break;
       }
       if (s.air){ drawAirBank(c, s, b, k); break; }
-      drawNoTouch(c, b.pts);
-      polyline(c, trimEnd(b.pts, .85)); c.setLineDash(DOTS); c.lineWidth = .42; c.strokeStyle = k; c.stroke(); arrowHead(c, b.pts, k);
+      if (s.shot){ drawShotLine(c, {...s, pts:b.pts}, k); }
+      else { drawNoTouch(c, b.pts);
+      polyline(c, trimEnd(b.pts, .85)); c.setLineDash(DOTS); c.lineWidth = .42; c.strokeStyle = k; c.stroke(); arrowHead(c, b.pts, k); }
       c.lineWidth = .28; c.strokeStyle = k; c.setLineDash([]);
       for (const [bx, by] of b.bounces) for (let i = 0; i < 6; i++){ const an = i*Math.PI/3 + Math.PI/6; c.beginPath(); c.moveTo(bx + Math.cos(an)*.7, by + Math.sin(an)*.7); c.lineTo(bx + Math.cos(an)*1.5, by + Math.sin(an)*1.5); c.stroke(); }
       break;
@@ -2648,7 +2674,7 @@ function draw3DArcs(list){
       ctx.stroke(); }
     const end = s.head ? 26 : 32;
     ctx.beginPath(); pts.slice(0, end + 1).forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p.x, p.y));
-    ctx.setLineDash(s.dots ? [.01, k*.66] : [k*.9, k*.6]); ctx.lineWidth = k*(s.dots ? .42 : .32); ctx.strokeStyle = s.color; ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash(s.solid ? [] : s.dots ? [.01, k*.66] : [k*.9, k*.6]); ctx.lineWidth = k*(s.solid ? .55 : s.dots ? .42 : .32); ctx.strokeStyle = s.color; ctx.stroke(); ctx.setLineDash([]);
     if (s.head){ /* arrowhead pointing down onto the target */
       const e = pts[32], b = pts[29], ang = Math.atan2(e.y - b.y, e.x - b.x), z = k*1.4;
       ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(ang); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-z, z*.56); ctx.lineTo(-z*.74, 0); ctx.lineTo(-z, -z*.56); ctx.closePath(); ctx.fillStyle = s.color; ctx.fill(); ctx.restore();
@@ -3208,7 +3234,7 @@ cv.addEventListener('pointerdown', e => {
   if (tool === 'run' || tool === 'dribble') draft = {type:'arrow', style:tool, pts:[[sp.x, sp.y]], color};
   if (tool === 'run' && draft){ const rp = runnerAt([sp.x, sp.y], f); draft.runner = rp ? rp.id : null; draft.limit = runLimit(rp, f); }
   else if (tool === 'pen') draft = {type:'pen', pts:[[p.x, p.y]], color, ...penProps()};
-  else if (tool === 'shot') draft = {type:'arrow', style:'pass', shot:true, pts:[[sp.x, sp.y], [sp.x, sp.y]], color};
+  else if (tool === 'shot') draft = {type:'arrow', style:'pass', shot:true, pts:[[sp.x, sp.y], [sp.x, sp.y]], color, ...(touchMods.air ? {air:true} : {})};
   else if (tool === 'pass') draft = {type:'arrow', style:'pass', pts:[[sp.x, sp.y], [sp.x, sp.y]], color, ...(touchMods.air ? {air:true, recv:touchMods.volley ? 'volley' : 'control'} : {})};
   else if (tool === 'air') draft = {type:'arrow', style:'pass', air:true, recv:touchMods.volley ? 'volley' : 'control', pts:[[sp.x, sp.y], [sp.x, sp.y]], color};
   else if (tool === 'bank'){ draft = {type:'bank2', stage:1, a:[sp.x, sp.y], cur:[sp.x, sp.y], color, air:e.shiftKey || touchMods.loft}; }
@@ -3278,7 +3304,7 @@ function endPointer(){
       else if (d.stage === 2){ d.awaitClick = true; draft = d; draw(); toast(touchInput ? 'Drag to set how far it rebounds, then lift your finger.' : 'Move along the rebound to set its length, then click. Slide along the wall or right-click to re-aim. Esc cancels.'); return; }
       else toast(d.blocked ? 'A ground pass into the goal mouth goes in. Press Shift to loft it off the glass.' : 'Drag the pass all the way to a wall to bounce it.');
     }
-    if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.shot) sh.shot = true; else if (d.air){ sh.air = true; sh.recv = d.recv; } } }
+    if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.shot) sh.shot = true; if (d.air){ sh.air = true; sh.recv = d.recv || 'control'; } } }
     else if (d.type === 'arrow' || d.type === 'pen'){ const pts = processStroke(d.pts, d.type === 'pen'); if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color, ...(d.ee && d.style !== 'pass' ? {ee:true} : {})}; }
     else if (d.type === 'bank'){ if (Math.hypot(d.t[0] - d.a[0], d.t[1] - d.a[1]) > 2) sh = {type:'bank', a:r2(d.a), t:r2(d.t), wall:d.wall || autoWall(d.a, d.t, d.air), color:d.color}; if (d.air){ sh.air = true; sh.recv = 'control'; } }
     else if (d.type === 'rect'){ if (d.w > 1 && d.h > 1) sh = {type:'rect', x:d.x, y:d.y, w:d.w, h:d.h, color:d.color}; }
@@ -3324,6 +3350,13 @@ function openMenu(x, y, items){
   for (const it of items){
     if (it.title){ const h = document.createElement('div'); h.className = 'cm-title'; h.textContent = it.title; cm.appendChild(h); continue; }
     if (it.sep){ const d = document.createElement('div'); d.className = 'cm-sep'; cm.appendChild(d); continue; }
+    if (it.range){ /* a slider: live while dragging, one undo step when let go */
+      const r = it.range, row = document.createElement('label'); row.className = 'cm-range';
+      const lab = document.createElement('span'), inp = document.createElement('input'); inp.type = 'range'; inp.min = r.min; inp.max = r.max; inp.step = r.step; inp.value = r.value;
+      lab.textContent = r.label(+inp.value); let snapped = false;
+      inp.addEventListener('input', () => { if (!snapped){ snapshot(); snapped = true; } lab.textContent = r.label(+inp.value); r.input(+inp.value); });
+      inp.addEventListener('change', () => { r.input(+inp.value); commit(); snapped = false; });
+      row.append(lab, inp); cm.appendChild(row); continue; }
     if (it.colors){
       const row = document.createElement('div'); row.className = 'cm-colors';
       for (const c of [...SWATCHES, ...customColors]){
@@ -3366,10 +3399,10 @@ function shapeMenu(s){
   const items = [{title:name}, {colors:true, current:s.color, pick:c => editShape(s.id, x => { x.color = c; })}];
   if (s.type === 'dive'){ items.push({segment:[['catch', 'Catch'], ['deflect', 'Deflect'], ['miss', 'Miss']], current:s.mode || 'catch', pick:v => editShape(s.id, x => { x.mode = v; })}, {label:'Re-aim the jump', run:() => startDive(s.gk, s.id)}); }
   if (s.type === 'arrow') items.push({segment:[['run','Run'],['pass','Pass'],['dribble','Dribble']], current:s.style, pick:v => editShape(s.id, x => { x.style = v; if (v === 'pass') x.pts = [x.pts[0], x.pts[x.pts.length-1]]; else { delete x.air; delete x.recv; } })});
-  if (s.type === 'arrow' && s.style === 'pass') items.push({segment:[['pass','Pass'],['shot','Shot']], current:s.shot ? 'shot' : 'pass', pick:v => editShape(s.id, x => { if (v === 'shot'){ x.shot = true; delete x.air; delete x.recv; } else delete x.shot; })});
-  if (s.type === 'arrow' && s.style === 'pass' && !s.shot){
+  if (s.type === 'arrow' && s.style === 'pass') items.push({segment:[['pass','Pass'],['shot','Shot']], current:s.shot ? 'shot' : 'pass', pick:v => editShape(s.id, x => { if (v === 'shot') x.shot = true; else delete x.shot; })});
+  if (s.type === 'arrow' && s.style === 'pass'){
     items.push({segment:[['ground','Ground'],['air','Aerial']], current:s.air ? 'air' : 'ground', pick:v => editShape(s.id, x => { if (v === 'air'){ x.air = true; x.recv = x.recv || 'control'; } else { delete x.air; delete x.recv; } })});
-    if (s.air) items.push({segment:[['control','Control'],['volley','Volley']], current:s.recv || 'control', pick:v => editShape(s.id, x => { x.recv = v; })});
+    if (s.air && !s.shot) items.push({segment:[['control','Control'],['volley','Volley']], current:s.recv || 'control', pick:v => editShape(s.id, x => { x.recv = v; })});
   }
   if (s.type === 'arrow' && s.style !== 'pass') items.push({label:'Extra Effort on this run', key:'Q', checked:!!s.ee, run:() => editShape(s.id, x => { if (x.ee) delete x.ee; else x.ee = true; })});
   if (s.type === 'arrow' && s.style === 'run'){
@@ -3377,6 +3410,11 @@ function shapeMenu(s){
     if (passCfg.runSame && pathLen(s.pts) > lim + .05) items.push({label:'Trim to max run', run:() => editShape(s.id, x => { x.pts = capPath(x.pts, lim).map(r2); })});
     items.push({label:'Use this as the max run', run:() => { snapshot(); frame().runMax = baseFromRun(s, frame()); if (!passCfg.runSame){ passCfg.runSame = true; $('#runSame').checked = true; saveSettings(); } commit(); }});
   }
+  if (s.type === 'bank') items.push({segment:[['pass','Pass'],['shot','Shot']], current:s.shot ? 'shot' : 'pass', pick:v => editShape(s.id, x => { if (v === 'shot') x.shot = true; else delete x.shot; })});
+  if (s.type === 'bank' && s.air){ const bb = bankOf(s); if (bb.ok){ const w = wallReach(s, bb);
+    if (w.ok) items.push({range:{min:0, max:1, step:.01, value:typeof s.hfrac === 'number' ? s.hfrac : (wallHeight(s, bb) - w.hMin)/((w.hMax - w.hMin) || 1),
+      label:v => `Wall contact height: ${toM(w.hMin + v*(w.hMax - w.hMin)).toFixed(1)} m (max ${toM(w.hMax).toFixed(1)} m at 45°)`,
+      input:v => { const x = frame().shapes.find(y => y.id === s.id); if (x){ x.hfrac = Math.round(v*100)/100; draw(); } }}}); } }
   if (s.type === 'bank'){
     items.push({segment:[['ground','Ground'],['air','Aerial']], current:s.air ? 'air' : 'ground', pick:v => editShape(s.id, x => { if (v === 'air'){ x.air = true; x.recv = x.recv || 'control'; } else { delete x.air; delete x.recv; if (!bankPath(x.a, x.t, x.wall, false, x.walls).ok){ delete x.walls; x.wall = autoWall(x.a, x.t); } } })});
     if (s.walls) items.push({title:'Off ' + s.walls.map(w => WALL_NAMES[w].replace(' end', '')).join(' → ')});
@@ -3513,6 +3551,7 @@ function syncTouchBar(){
   let html = '';
   if (on && draft && draft.type === 'bank2' && draft.awaitClick) html = `<button data-tm="cancel" class="danger">Cancel wall pass</button>`;
   else if (on && tool === 'pass') html = T('air', 'Aerial', touchMods.air) + (touchMods.air ? T('volley', 'Volley', touchMods.volley) : '');
+  else if (on && tool === 'shot') html = T('air', 'Aerial', touchMods.air);
   else if (on && tool === 'air') html = T('volley', 'Receiver volleys', touchMods.volley);
   else if (on && tool === 'bank') html = T('loft', 'Lofted', touchMods.loft);
   if (html === touchBarKey) return; touchBarKey = html;
@@ -4458,7 +4497,7 @@ $('#fsBtn').addEventListener('click', () => {
 });
 
 /* ---------- keyboard ---------- */
-const KEYS = {j:'shot', i:'air', v:'select', r:'run', p:'pass', d:'dribble', b:'bank', z:'zone', o:'circle', f:'pen', t:'text', e:'erase', u:'ruler'};
+const KEYS = {j:'shot', v:'select', r:'run', p:'pass', d:'dribble', b:'bank', z:'zone', o:'circle', f:'pen', t:'text', e:'erase', u:'ruler'};
 document.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'){ if (e.key === 'Escape') e.target.blur(); return; }
@@ -4477,7 +4516,15 @@ document.addEventListener('keydown', e => {
   if (tool === 'pen' && k === ','){ setPen('clear', !penCfg.clear); return; }
   if (k === 'w'){ cycleWall(); return; }
   if (KEYS[k]){ setTool(KEYS[k]); return; }
-  if (k >= '1' && k <= '5'){ setColor(SWATCHES[+k - 1]); return; }
+  /* number row: ` follows the ball, 1–5 home players, 6–9 and 0 away players (again to stop).
+     Shift+1–5 picks a drawing colour, Shift+0 fits the whole pitch. */
+  if (e.code === 'Backquote' || /^Digit[0-9]$/.test(e.code)){
+    const dgt = e.code === 'Backquote' ? null : +e.code.slice(5);
+    if (e.shiftKey && dgt != null){ if (dgt >= 1 && dgt <= 5) setColor(SWATCHES[dgt - 1]); else if (dgt === 0) zoomFit(); return; }
+    let id = 'ball';
+    if (dgt != null){ const n = dgt === 0 ? 10 : dgt, list = ['home', 'away'].flatMap(t => doc.pieces.filter(p => p.team === t).slice(0, 5)), pc = list[n - 1]; if (!pc) return; id = pc.id; }
+    if (followBall && followId === id) setFollow(false); else setFollow(true, id);
+    return; }
   if ((k === 'delete' || k === 'backspace') && bankReaim()){ e.preventDefault(); return; }
   if (k === 'delete' || k === 'backspace'){ e.preventDefault(); if (selShape()) deleteSel(); else if (hoverId) removePiece(hoverId); return; }
   if (k === 'arrowright'){ e.preventDefault(); goStep(cur + 1); return; }
@@ -4487,7 +4534,6 @@ document.addEventListener('keydown', e => {
   if (k === 'h'){ toggleClean(); return; }
   if (k === '=' || k === '+'){ zoomStep(1); return; }
   if (k === '-' || k === '_'){ zoomStep(-1); return; }
-  if (k === '0'){ zoomFit(); return; }
   if (k === 'k'){ if (followBall && followId === 'ball') setFollow(false); else setFollow(true, 'ball'); return; }
   if (k === 'y'){ setView(VIEW_ORDER[(VIEW_ORDER.indexOf(viewId) + (e.shiftKey ? VIEW_ORDER.length - 1 : 1)) % VIEW_ORDER.length], viewFlip); return; }
   if (k === 'l'){ toggleOv('lanes'); return; }
@@ -4539,7 +4585,7 @@ function ktipRows(){
   if (sh && tool === 'select'){ const selOn = sh.id === sel;
     return (sh.type === 'bank' && selOn ? K('W', 'Switch wall') : '') + (selOn ? K('Del', 'Delete') : '') + K('Right-click', 'Edit'); }
   if (tool === 'bank') return K('Shift', 'Start lofted');
-  if (tool === 'pass') return K('Shift', 'Aerial while drawing');
+  if (tool === 'pass' || tool === 'shot') return K('Shift', 'Aerial while drawing');
   if (tool === 'text') return K('[ ]', 'Size') + K('.', textCfg.box ? 'Label on' : 'Label box', textCfg.box) + K(',', textCfg.clear ? 'See-through on' : 'See-through', textCfg.clear);
   if (tool === 'pen') return K('[ ]', 'Thickness') + K('.', penCfg.dots ? 'Dotted on' : 'Dotted', penCfg.dots) + K(',', penCfg.clear ? 'See-through on' : 'See-through', penCfg.clear);
   return '';
@@ -5010,7 +5056,7 @@ function panelInit(){
 
 /* ---------- boot ---------- */
 function boot(){
-  try { const s = JSON.parse(localStorage.getItem(SET_KEY)); if (s){ if (s.launch === 'fresh') launch = 'fresh'; if (s.libSort === 'az') LIB.sort = 'az'; if (s.textCfg && TEXT_S[s.textCfg.s]) textCfg = {s:s.textCfg.s, box:!!s.textCfg.box, clear:!!s.textCfg.clear}; if (s.penCfg && PEN_W[s.penCfg.w]) penCfg = {w:s.penCfg.w, dots:!!s.penCfg.dots, clear:!!s.penCfg.clear}; ov = {...ov, ...s.ov}; speed = s.speed || 1; loop = !!s.loop; soundOn = s.soundOn !== false; animMoves = s.animMoves !== false; hideTut = !!s.hideTut; focusOn = !!s.focusOn; if (VIEWS[s.viewId]) viewId = s.viewId; viewFlip = !!s.viewFlip; color = s.color || color; tool = s.tool || tool; if (s.passCfg && isFinite(s.passCfg.noTouch)) passCfg.noTouch = s.passCfg.noTouch; if (s.passCfg && isFinite(s.passCfg.lift)) passCfg.lift = s.passCfg.lift; if (s.passCfg){ passCfg.runSame = !!s.passCfg.runSame; if (isFinite(s.passCfg.eeAdd) && s.passCfg.eeV === 4) passCfg.eeAdd = s.passCfg.eeAdd; /* older saves used a percentage */ } if (Array.isArray(s.customColors)) customColors = s.customColors.slice(0, 4); if (s.pieceCfg){ if (BALLS.some(b => b.id === s.pieceCfg.ball)) pieceCfg.ball = s.pieceCfg.ball; pieceCfg.figures = !!s.pieceCfg.figures; } if (s.pitchCol && s.pitchCol.L) pitchCols['5v5'] = pitchCol = withMids(s.pitchCol); if (s.pitchCols && s.pitchCols['1v1'] && s.pitchCols['1v1'].L) pitchCols['1v1'] = withMids(s.pitchCols['1v1']); } } catch {}
+  try { const s = JSON.parse(localStorage.getItem(SET_KEY)); if (s){ if (s.launch === 'fresh') launch = 'fresh'; if (s.libSort === 'az') LIB.sort = 'az'; if (s.textCfg && TEXT_S[s.textCfg.s]) textCfg = {s:s.textCfg.s, box:!!s.textCfg.box, clear:!!s.textCfg.clear}; if (s.penCfg && PEN_W[s.penCfg.w]) penCfg = {w:s.penCfg.w, dots:!!s.penCfg.dots, clear:!!s.penCfg.clear}; ov = {...ov, ...s.ov}; speed = s.speed || 1; loop = !!s.loop; soundOn = s.soundOn !== false; animMoves = s.animMoves !== false; hideTut = !!s.hideTut; focusOn = !!s.focusOn; if (VIEWS[s.viewId]) viewId = s.viewId; viewFlip = !!s.viewFlip; color = s.color || color; tool = s.tool === 'air' ? 'pass' : s.tool || tool; if (s.passCfg && isFinite(s.passCfg.noTouch)) passCfg.noTouch = s.passCfg.noTouch; if (s.passCfg && isFinite(s.passCfg.lift)) passCfg.lift = s.passCfg.lift; if (s.passCfg){ passCfg.runSame = !!s.passCfg.runSame; if (isFinite(s.passCfg.eeAdd) && s.passCfg.eeV === 4) passCfg.eeAdd = s.passCfg.eeAdd; /* older saves used a percentage */ } if (Array.isArray(s.customColors)) customColors = s.customColors.slice(0, 4); if (s.pieceCfg){ if (BALLS.some(b => b.id === s.pieceCfg.ball)) pieceCfg.ball = s.pieceCfg.ball; pieceCfg.figures = !!s.pieceCfg.figures; } if (s.pitchCol && s.pitchCol.L) pitchCols['5v5'] = pitchCol = withMids(s.pitchCol); if (s.pitchCols && s.pitchCols['1v1'] && s.pitchCols['1v1'].L) pitchCols['1v1'] = withMids(s.pitchCols['1v1']); } } catch {}
   let saved = null; try { saved = JSON.parse(localStorage.getItem(CUR_KEY)); } catch {}
   /* the old example play moved to the Tutorial row: drop the copy that used to be seeded into the library */
   try { if (!localStorage.getItem(TUT_KEY)){ localStorage.setItem(TUT_KEY, '1'); localStorage.setItem(SEED_KEY, '1');
