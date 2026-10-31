@@ -1569,7 +1569,11 @@ const ZMAX = 6, pointers = new Map();
    over the right shoulder, about 7.5 units back and 2.9 up, pitched ~4° down, ~90° wide (matched to Joseph's screenshots).
    Drag on the pitch while it plays to look around (left/right turns the camera, up/down aims it). */
 let otsOn = false, ots = null, otsLook = null;
-const OTS = {dist:7.5, side:.9, h:2.9, tilt:86, fov:90, pitchMin:-8, pitchMax:24};
+/* measured from in-game screenshots: a spring arm pivoting at shoulder height, camera over the right shoulder.
+   Aim is in degrees below level: 4 is the default look, 18 is the lowest the game allows, negatives look up. */
+const OTS = {arm:5.5, pivot:1.6, side:.6, fov:90, aim:4, aimDown:21.5, aimUp:-20, minH:.45};
+/* in-game players are ~1.9 units tall; the board's figures are drawn bigger so they read from above */
+const figK = () => camv && camv.ots ? .76 : 1;
 const otsActive = () => otsOn && anim.playing && followBall && followId !== 'ball' && !!piece(followId) && glReady();
 function otsUpdate(pos, snap){
   const id = followId, q = pos[id]; if (!q) return;
@@ -1579,13 +1583,18 @@ function otsUpdate(pos, snap){
   if (!ots.manual && d != null && spd > 1.5) ots.h = lerpAng(ots.h, d, .06);
   ots.x = q.x; ots.y = q.y;
 }
+const otsAim = () => clamp(OTS.aim - (ots.pitch || 0), OTS.aimUp, OTS.aimDown);
 function applyOTS(){
-  const th = OTS.tilt*Math.PI/180, D = OTS.h/Math.cos(th), fx = Math.cos(ots.h), fy = Math.sin(ots.h), rx = -fy, ry = fx;
-  const cx = ots.x - fx*OTS.dist + rx*OTS.side, cy0 = ots.y - fy*OTS.dist + ry*OTS.side; /* camera over the right shoulder */
+  const phi = otsAim()*Math.PI/180, fx = Math.cos(ots.h), fy = Math.sin(ots.h), rx = -fy, ry = fx;
+  /* swing the camera on its arm; when looking up the arm shortens so it never sinks into the turf */
+  let L = OTS.arm; if (OTS.pivot + L*Math.sin(phi) < OTS.minH) L = (OTS.pivot - OTS.minH)/-Math.sin(phi);
+  const camH = OTS.pivot + L*Math.sin(phi), back = L*Math.cos(phi);
+  const cx = ots.x - fx*back + rx*OTS.side, cy0 = ots.y - fy*back + ry*OTS.side; /* over the right shoulder */
+  const tiltDeg = 90 - Math.max(OTS.aim, otsAim()), th = tiltDeg*Math.PI/180, D = camH/Math.cos(th);
   const ahead = D*Math.sin(th), tx = cx + fx*ahead, ty = cy0 + fy*ahead, a = Math.atan2(-fx, -fy);
-  camv = {yaw:a*180/Math.PI, tilt:OTS.tilt, D, region:[tx - 1, ty - 1, tx + 1, ty + 1], ots:true};
+  camv = {yaw:a*180/Math.PI, tilt:tiltDeg, D, region:[tx - 1, ty - 1, tx + 1, ty + 1], ots:true, eye:{x:cx, y:cy0, fx, fy}};
   const f = (base.w/2)/Math.tan(OTS.fov/2*Math.PI/180), k = f/D;
-  const sy = base.h/2 + f*Math.tan((ots.pitch || 0)*Math.PI/180); /* aiming up/down slides the view, like tilting the camera */
+  const sy = base.h/2 + f*Math.tan((OTS.aim - Math.min(OTS.aim, otsAim()))*Math.PI/180); /* looking above the default tilts the view up */
   const P = projH(camv), S = [k, 0, base.w/2, 0, k, sy, 0, 0, 1];
   Hfit = Hf = hMul(S, P); Hinv = hInv(Hf);
   cam3 = {S, cs:Math.cos(a), sn:Math.sin(a), st:Math.sin(th), ct:Math.cos(th), D, tx, ty};
@@ -1611,7 +1620,7 @@ cv.addEventListener('pointerdown', e => {
 cv.addEventListener('pointermove', e => {
   if (!otsLook || e.pointerId !== otsLook.id || !ots) return; e.stopImmediatePropagation();
   ots.h = otsLook.h + (e.clientX - otsLook.x)*.0055;
-  ots.pitch = clamp(otsLook.p - (e.clientY - otsLook.y)*.18, OTS.pitchMin, OTS.pitchMax); /* mouse up looks up */
+  ots.pitch = clamp(otsLook.p - (e.clientY - otsLook.y)*.18, OTS.aim - OTS.aimDown, OTS.aim - OTS.aimUp); /* mouse up looks up */
   if (!(anim.phase === 'move')) draw();
 }, true);
 for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, e => { if (otsLook && e.pointerId === otsLook.id){ otsLook = null; cv.style.cursor = ''; e.stopImmediatePropagation(); } }, true);
@@ -1660,7 +1669,7 @@ function padTick(now){
     if (otsActive() && ots && (rx || ry)){
       ots.manual = true;
       ots.h += rx*Math.abs(rx)*2.6*dt;                                         /* ~150°/s at full tilt, gentle near the middle */
-      ots.pitch = clamp((ots.pitch || 0) - ry*Math.abs(ry)*60*dt, OTS.pitchMin, OTS.pitchMax); /* stick up looks up */
+      ots.pitch = clamp((ots.pitch || 0) - ry*Math.abs(ry)*60*dt, OTS.aim - OTS.aimDown, OTS.aim - OTS.aimUp); /* stick up looks up */
       if (anim.phase !== 'move') draw();
     } else if (!otsActive()){
       if (ry) zoomAt(cam.z*Math.exp(-ry*1.6*dt));
@@ -1792,6 +1801,7 @@ function syncViewUI(){
 }
 
 /* ---------- WebGL ground for tilted views ---------- */
+let glTexNear = null, ncv = null, nctx = null;
 let gl = null, glProg = null, glTex = null, glTried = false, gcv = null, gctx = null, gScale = 0;
 /* largest ground picture this graphics card accepts; halved automatically if an upload ever fails */
 let glCap = 4096;
@@ -1805,16 +1815,17 @@ function glReady(){
     glc.addEventListener('webglcontextrestored', () => { glTried = false; gScale = 0; draw(); }); }
   const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); return o; };
   glProg = gl.createProgram();
-  gl.attachShader(glProg, sh(gl.VERTEX_SHADER, 'attribute vec2 p;uniform mat3 H;uniform vec2 ext;uniform float m;varying vec2 uv;void main(){vec3 c=H*vec3(p,1.0);gl_Position=vec4(c.xy,0.0,c.z);uv=(p+m)/ext;}'));
+  gl.attachShader(glProg, sh(gl.VERTEX_SHADER, 'attribute vec2 p;uniform mat3 H;uniform mat3 T;varying vec2 uv;void main(){vec3 c=H*vec3(p,1.0);gl_Position=vec4(c.xy,0.0,c.z);uv=(T*vec3(p,1.0)).xy;}'));
   gl.attachShader(glProg, sh(gl.FRAGMENT_SHADER, 'precision mediump float;varying vec2 uv;uniform sampler2D t;void main(){gl_FragColor=texture2D(t,uv);}'));
   gl.linkProgram(glProg);
   if (!gl.getProgramParameter(glProg, gl.LINK_STATUS)){ gl = null; return false; }
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-M,-M, W+M,-M, -M,H+M, W+M,H+M]), gl.STATIC_DRAW);
-  glTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, glTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const mkTex = () => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return t; };
+  glTex = mkTex(); glTexNear = mkTex();
   gcv = document.createElement('canvas'); gctx = gcv.getContext('2d');
+  ncv = document.createElement('canvas'); nctx = ncv.getContext('2d');
   return true;
 }
 /* offscreen resolution follows how big the nearest part of the pitch is on screen */
@@ -1825,18 +1836,27 @@ function groundScale(){
   const cap = Math.max(4, Math.min(Math.floor(glCap/VW), Math.floor(glCap/VH), Math.floor(Math.sqrt(9e6/(VW*VH)))));
   return clamp(Math.ceil(k*dpr), Math.min(6, cap), camv && camv.ots ? Math.min(cap, 14) : cap);
 }
-function glDraw(){
+/* near: optional sharper patch {O, u, v, Wd, Ld} drawn over the area right in front of the over-the-shoulder camera */
+function glDraw(near){
   const w = base.w, h = base.h, N = [2/w,0,-1, 0,-2/h,1, 0,0,1], C = hMul(N, Hf);
   /* the drawing buffer can be smaller than the canvas on some machines; always fill all of it */
   gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(glProg); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.bindTexture(gl.TEXTURE_2D, glTex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+  glQuad(glTex, gcv, [-M,-M, W+M,-M, -M,H+M, W+M,H+M], [1/VW,0,M/VW, 0,1/VH,M/VH, 0,0,1], C);
+  if (near){ const {O, u, v, Wd, Ld} = near, P = (a, b) => [O.x + u.x*a + v.x*b, O.y + u.y*a + v.y*b];
+    gl.disable(gl.BLEND); /* replaces the blurrier full-pitch picture underneath */
+    glQuad(glTexNear, ncv, [...P(0,0), ...P(Wd,0), ...P(0,Ld), ...P(Wd,Ld)],
+      [u.x/Wd, u.y/Wd, -(u.x*O.x + u.y*O.y)/Wd, v.x/Ld, v.y/Ld, -(v.x*O.x + v.y*O.y)/Ld, 0,0,1], C); }
+}
+function glQuad(tex, src, verts, T, C){
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+  gl.bindTexture(gl.TEXTURE_2D, tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
   for (let i = 0; i < 8 && gl.getError() !== gl.NO_ERROR; i++){}
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, gcv);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
   if (gl.getError() !== gl.NO_ERROR && glCap > 1024){ glCap = Math.floor(glCap/2); gScale = 0; requestAnimationFrame(() => draw()); } /* too big for this card: retry smaller */
   const loc = gl.getAttribLocation(glProg, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
   gl.uniformMatrix3fv(gl.getUniformLocation(glProg, 'H'), false, [C[0],C[3],C[6], C[1],C[4],C[7], C[2],C[5],C[8]]);
-  gl.uniform2f(gl.getUniformLocation(glProg, 'ext'), VW, VH); gl.uniform1f(gl.getUniformLocation(glProg, 'm'), M);
+  gl.uniformMatrix3fv(gl.getUniformLocation(glProg, 'T'), false, [T[0],T[3],T[6], T[1],T[4],T[7], T[2],T[5],T[8]]);
   gl.uniform1i(gl.getUniformLocation(glProg, 't'), 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
@@ -2582,14 +2602,14 @@ function drawPiecesLocal(c, pos, kf, o){
 /* tilted views: players stand up as short pucks (side wall + top cap) with a shadow on the turf,
    the ball floats at its real height over its shadow; everything is drawn farthest first */
 const shade = (hex, t) => mixHex(hex, '#000000', t);
-const standH = () => (pieceCfg.figures ? FIG_H : PUCK_H)*q3d;
+const standH = () => (pieceCfg.figures ? FIG_H*figK() : PUCK_H)*q3d;
 /* a simple standing figure in the team kit. Defensive stance crouches with feet and arms wide,
    squared up the way the player faces; everyone else faces the ball. */
 function drawFigure(p, q, args, pos, kf){
   const [active, role, face, handle, ee] = args, col = pieceColor(p), st = face ? 1 : 0;
   const mv = !face && motionNow && motionNow[p.id], mvDir = mv ? (mv.dive ? null : mv.kick ? mv.kick.dir : mv.A > .02 ? mv.dir : null) : null;
-  const f = mvDir != null ? {x:Math.cos(mvDir), y:Math.sin(mvDir)} : face || facing(p, pos, null), g = {x:-f.y, y:f.x}, Hs = FIG_H*q3d;
-  const P = (fw, sd, z) => p3(q.x + f.x*fw + g.x*sd, q.y + f.y*fw + g.y*sd, z*Hs);
+  const f = mvDir != null ? {x:Math.cos(mvDir), y:Math.sin(mvDir)} : face || facing(p, pos, null), g = {x:-f.y, y:f.x}, fk = figK(), Hs = FIG_H*fk*q3d;
+  const P = (fw, sd, z) => p3(q.x + (f.x*fw + g.x*sd)*fk, q.y + (f.y*fw + g.y*sd)*fk, z*Hs);
   const kpx = (z) => { const j = j3(q.x, q.y, z*Hs); return Math.sqrt(Math.abs(j.a*j.d - j.b*j.c)); };
   /* on the turf: shadow, a team-coloured base ring (yellow for the keeper), Extra Effort ring */
   setJ(j3(q.x + .3, q.y + .4, 0)); ctx.beginPath(); face ? ctx.ellipse(0, 0, ST_B*.9, ST_A*.9, Math.atan2(f.y, f.x), 0, Math.PI*2) : ctx.arc(0, 0, PR*.85, 0, Math.PI*2); ctx.fillStyle = `rgba(0,0,0,${.15 + .2*q3d})`; ctx.fill();
@@ -2631,7 +2651,8 @@ function drawFigure(p, q, args, pos, kf){
   const hr = Math.max(2.5, .1*FIG_H*kpx(.93));
   ctx.beginPath(); ctx.arc(S.head.x, S.head.y, hr, 0, Math.PI*2); ctx.fillStyle = '#eef0f4'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.stroke();
   ctx.lineCap = 'butt';
-  /* label chip above the head, like the in-game tags */
+  /* label chip above the head, like the in-game tags (not over your own player in over-the-shoulder, same as in game) */
+  if (camv && camv.ots && ots && p.id === ots.id) return;
   const top = P(0, 0, 1.06), kt = kpx(1);
   ctx.setTransform(dpr*kt, 0, 0, dpr*kt, dpr*top.x, dpr*(top.y - hr*.4));
   const lab = String(p.label || ''), tag = [role, face ? 'DEF' : ''].filter(Boolean).join(' · ');
@@ -2841,7 +2862,18 @@ function renderFrame(pos, layers, o){
   gctx.setTransform(G, 0, 0, G, M*G, M*G);
   textSink = {c:gctx, G, list:[]}; air3d = []; let piecesArgs = null;
   let res; try { res = renderScene(gctx, pos, layers, {...o, pieces:(p, kf) => { piecesArgs = [p, kf]; }}); } finally { var texts = textSink.list, arcs = air3d; textSink = null; air3d = null; }
-  glDraw(); glc.style.visibility = 'visible';
+  let near = null;
+  if (camv.ots && camv.eye){ /* second, much sharper picture of the turf from just in front of the camera out ~30 units */
+    const e = camv.eye, u = {x:-e.fy, y:e.fx}, v = {x:e.fx, y:e.fy}, Wd = 34, Ld = 30, K = Math.max(20, Math.min(72, Math.floor(glCap/Wd)));
+    const O = {x:e.x + v.x*.5 - u.x*Wd/2, y:e.y + v.y*.5 - u.y*Wd/2};
+    if (ncv.width !== Wd*K || ncv.height !== Ld*K){ ncv.width = Wd*K; ncv.height = Ld*K; }
+    nctx.setTransform(1, 0, 0, 1, 0, 0); nctx.clearRect(0, 0, ncv.width, ncv.height); nctx.globalAlpha = 1;
+    nctx.setTransform(K*u.x, K*v.x, K*u.y, K*v.y, -K*(u.x*O.x + u.y*O.y), -K*(v.x*O.x + v.y*O.y));
+    textSink = {c:nctx, G:K, list:[]}; air3d = [];
+    try { renderScene(nctx, pos, layers, {...o, pieces:() => {}}); } finally { textSink = null; air3d = null; }
+    near = {O, u, v, Wd, Ld};
+  }
+  glDraw(near); glc.style.visibility = 'visible';
   drawArena3D(false);
   for (const t of texts){ /* ground labels, upright, at their projected spot */
     const j = hJac(Hf, t.x, t.y), k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c)); if (j.w < .5) continue;
