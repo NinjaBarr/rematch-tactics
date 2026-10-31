@@ -1580,7 +1580,11 @@ function otsUpdate(pos, snap){
   if (!ots || ots.id !== id || snap){ const pc = piece(id), b = pos.ball, toward = b && dist(b, q) > 3 ? Math.atan2(b.y - q.y, b.x - q.x) : (pc.team === 'home' ? 0 : Math.PI);
     ots = {id, x:q.x, y:q.y, h:toward, pitch:0, manual:false}; }
   const mo = anim.mo, d = mo && mo.dir && mo.dir[id], spd = mo && mo.spd ? mo.spd[id] || 0 : 0;
-  if (!ots.manual && d != null && spd > 1.5) ots.h = lerpAng(ots.h, d, .06);
+  /* in game you aim with the camera: swing round to face a pass or shot this player is about to hit */
+  const now = performance.now(), dt = clamp((now - (ots.tu || now))/1000, 0, .25), kk = !ots.manual && (anim.kicks || []).find(k => k.id === id && now - k.t > -650 && now - k.t < 250);
+  ots.tu = now; /* turn rates are per second so slow machines turn just as fast */
+  if (kk) ots.h = lerpAng(ots.h, kk.dir, 1 - Math.exp(-9*dt));
+  else if (!ots.manual && d != null && spd > 1.5) ots.h = lerpAng(ots.h, d, 1 - Math.exp(-3.6*dt));
   ots.x = q.x; ots.y = q.y;
 }
 const otsAim = () => clamp(OTS.aim - (ots.pitch || 0), OTS.aimUp, OTS.aimDown);
@@ -1603,6 +1607,7 @@ function applyOTS(){
 function endOTS(){ otsLook = null; if (camv && camv.ots){ camv = viewParams(viewId, viewFlip); applyView(); } }
 /* the in-game radar (bottom right): centred on your player, turns with the camera so forward is up.
    Teammates are dots, opponents diamonds, the ball a white dot in a yellow ring; anyone off the radar sits on the rim as an arrow. */
+let radarTrack = {};
 function drawOTSRadar(pos){
   if (!ots || !pos[ots.id]) return;
   const c = ctx, me = piece(ots.id), P = pos[ots.id];
@@ -1663,8 +1668,13 @@ function drawOTSRadar(pos){
     else { c.beginPath(); c.arc(m.x, m.y, s*1.55, 0, Math.PI*2); c.lineWidth = Math.max(2, s*.45); c.strokeStyle = '#f5c518'; c.stroke();
       c.beginPath(); c.arc(m.x, m.y, s*.95, 0, Math.PI*2); c.fillStyle = '#ffffff'; c.fill(); } }
   /* you: an arrow in the middle pointing where you are running (or where the camera looks) */
-  const mo = anim.mo, dir = mo && mo.dir && mo.dir[me.id] != null && (mo.spd ? mo.spd[me.id] || 0 : 0) > 1.5 ? mo.dir[me.id] : ots.h;
-  const ang = Math.atan2(Math.cos(dir)*rx + Math.sin(dir)*ry, -(Math.cos(dir)*fx + Math.sin(dir)*fy));
+  /* point the arrow the way the player is actually moving (from frame to frame); hold the last heading when standing */
+  const rt = radarTrack, now = performance.now();
+  if (!rt.id || rt.id !== me.id || Math.hypot(P.x - rt.x, P.y - rt.y) > 8){ radarTrack = {id:me.id, x:P.x, y:P.y, dir:rt.id === me.id ? rt.dir : ots.h}; }
+  else if (Math.hypot(P.x - rt.x, P.y - rt.y) > .12){ const d = Math.atan2(P.y - rt.y, P.x - rt.x); rt.dir = rt.dir == null ? d : lerpAng(rt.dir, d, .45); rt.x = P.x; rt.y = P.y; rt.tm = now; }
+  else if (now - (rt.tm || 0) > 250) rt.dir = lerpAng(rt.dir == null ? ots.h : rt.dir, ots.h, .25); /* standing: faces where you aim */
+  const dir = radarTrack.dir == null ? ots.h : radarTrack.dir;
+  const ang = Math.atan2(Math.cos(dir)*rx + Math.sin(dir)*ry, Math.cos(dir)*fx + Math.sin(dir)*fy); /* 0 = straight up the radar */
   c.translate(cx, cy); c.rotate(ang); c.beginPath(); c.moveTo(0, -s*2); c.lineTo(s*1.3, s*1.2); c.lineTo(0, s*.5); c.lineTo(-s*1.3, s*1.2); c.closePath();
   c.fillStyle = pieceColor(me); c.fill(); c.lineWidth = 1.3; c.strokeStyle = '#ffffff'; c.stroke();
   c.restore();
@@ -2756,6 +2766,32 @@ function animSkeleton(J, m){
   for (const q of ['hipL', 'hipR']) up(q, bob);
   for (const q of ['shL', 'shR', 'elL', 'elR', 'haL', 'haR', 'neck', 'head']) up(q, bob, lean);
 }
+/* ball trail for passes and shots: the last ~0.45 s of a fast-moving ball, fading out behind it */
+let ballTrail = [];
+const TRAIL_SECS = .45, TRAIL_SPEED = 14; /* units/s: faster than any dribble, slower than any pass */
+function ballTrailPush(x, y, z){
+  const t = performance.now()/1000;
+  if (!anim.playing){ ballTrail = []; return; }
+  const last = ballTrail[ballTrail.length - 1];
+  if (last && t - last.t < .008) return;
+  const fast = !!last && Math.hypot(x - last.x, y - last.y, z - last.z)/Math.max(.001, t - last.t) > TRAIL_SPEED && Math.hypot(x - last.x, y - last.y) < 8;
+  if (last && Math.hypot(x - last.x, y - last.y) > 8) ballTrail = []; /* a jump (new step, seek) starts over */
+  ballTrail.push({x, y, z, t, fast});
+  while (ballTrail.length && t - ballTrail[0].t > TRAIL_SECS) ballTrail.shift();
+}
+function drawBallTrail(kBall){
+  if (ballTrail.length < 2) return;
+  const t = performance.now()/1000, pts = ballTrail.map(b => ({...p3(b.x, b.y, b.z), age:(t - b.t)/TRAIL_SECS, fast:b.fast}));
+  ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.lineCap = 'round';
+  for (let i = 1; i < pts.length; i++){
+    const a = pts[i - 1], b = pts[i]; if (!b.fast || a.w < 3.2 || b.w < 3.2) continue;
+    const f = 1 - b.age; if (f <= 0) continue;
+    const wpx = Math.max(1.5, BR*2*kBall*(b.w > 0 ? 1 : 0))*(.25 + .75*f);
+    ctx.globalAlpha = .6*f*f*(wpx > 14 ? 14/wpx : 1); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.min(wpx, 14);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  ctx.restore();
+}
 function drawPiecesProjected(pos, kf, o){
   const list = doc.pieces.filter(p => p.team === 'ball' || doc.show[p.team]).map(p => ({p, w:p3(pos[p.id].x, pos[p.id].y, 0).w})).sort((a, b) => b.w - a.w);
   const hp = PUCK_H*q3d;
@@ -2767,7 +2803,14 @@ function drawPiecesProjected(pos, kf, o){
     if (p.team === 'ball'){
       const z = BR + (o.ballZ || 0), g = j3(q.x, q.y, 0);
       setJ(g); ctx.beginPath(); ctx.ellipse(.15, .1, BR*(1 + (o.ballZ || 0)*.08), BR*.95*(1 + (o.ballZ || 0)*.08), 0, 0, Math.PI*2); ctx.fillStyle = `rgba(0,0,0,${clamp(.38 - (o.ballZ || 0)*.05, .12, .38)})`; ctx.fill();
-      const j = j3(q.x, q.y, z), k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c));
+      const j = j3(q.x, q.y, z); let k = Math.sqrt(Math.abs(j.a*j.d - j.b*j.c));
+      ballTrailPush(q.x, q.y, z); drawBallTrail(k);
+      ctx.globalAlpha = 1;
+      if (camv && camv.ots){ /* like the game: the ball never shrinks below a few pixels, and a white ring keeps it findable far away */
+        const rpx = BR*k, ringR = Math.max(rpx*1.45, 9);
+        if (rpx < 14){ ctx.setTransform(dpr, 0, 0, dpr, dpr*j.x, dpr*j.y); ctx.beginPath(); ctx.arc(0, 0, ringR, 0, Math.PI*2);
+          ctx.lineWidth = 2.4; ctx.strokeStyle = `rgba(255,255,255,${clamp((14 - rpx)/8, 0, .9)})`; ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3; ctx.stroke(); ctx.shadowBlur = 0; }
+        k = Math.max(k, 4.2/BR); }
       ctx.setTransform(dpr*k, 0, 0, dpr*k, dpr*j.x, dpr*j.y);
       drawBall(ctx, {x:0, y:0}, o.ballLocked, o.ballLift, (q.x + q.y)*.6);
       continue;
