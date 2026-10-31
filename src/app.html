@@ -745,6 +745,7 @@ const TOOLS = [
   {id:'select', key:'V', name:'Move', svg:'<path d="M5 3l14 8-6.2 1.8L10.5 19z" fill="currentColor" stroke="none"/>'},
   {id:'run', key:'R', name:'Run', svg:'<path d="M4 19c4-1 9-6 12-12"/><path d="M11 6.5 16.5 6 17 11.5"/>'},
   {id:'pass', key:'P', name:'Pass', svg:'<path d="M4 19 17.5 6.5" stroke-dasharray="0.1 3.4" stroke-width="2.6"/><path d="M11 6h7v7"/>'},
+  {id:'shot', key:'J', name:'Shot', svg:'<path d="M3.5 20.5 16 8" stroke-width="2.6"/><path d="M6.5 13.5l3 3M9.5 10.5l3 3" stroke-width="1.6"/><path d="M12.5 5.5h7v7"/>'},
   {id:'air', key:'I', name:'Aerial pass', svg:'<path d="M3 19C6 7 13 4 19 7" stroke-dasharray="0.1 3.4" stroke-width="2.6"/><path d="M14.5 4.5 19.5 7l-2.2 4.8"/><path d="M3 21h17" stroke-dasharray="2 2"/>'},
   {id:'dribble', key:'D', name:'Dribble', svg:'<path d="M3 17c1.6-2.6 3.2.6 4.8-2s3.2.6 4.8-2 3.2.6 4.8-2"/><path d="M14.5 6.5h5v5"/>'},
   {id:'bank', key:'B', name:'Wall pass', svg:'<path d="M4 5l7.5 12L19 6"/><path d="M14.5 5.5 19 6l.5 4.5"/><path d="M2.5 20.5h19" stroke-width="2.4"/>'},
@@ -1111,9 +1112,10 @@ function goalAt(pt){
    player through any dribble that follows (or goes on in another pass). Times are in "beats": 1 beat = one
    normal step of playback. */
 /* Real game speeds (measured by Joseph), in pitch units per second. Playback runs in real time from these:
-   sprint 10 units in 1.15 s; Extra Effort 10 units in 1 s and lasts 1.5 s; a full-power shot covers 33.4 units in 1 s;
+   sprint 10 m in 1.15 s; Extra Effort 10 m in 1 s and lasts 1.5 s; a full-power shot covers 33.4 units in 1 s;
    a full-power tap pass covers 33.4 units in 1.15 s. Dribble, lob and dive speeds are estimates. */
-const SPEED = {sprint:10/1.15, ee:10, eeSecs:1.5, shot:33.4, pass:33.4/1.15};
+const UNITS_PER_M = 1.0437; /* 9.55 units = 9.15 m (centre circle) */
+const SPEED = {sprint:10*UNITS_PER_M/1.15, ee:10*UNITS_PER_M, eeSecs:1.5, shot:33.4, pass:33.4/1.15}; /* sprint 10 m in 1.15 s, EE 10 m in 1 s; ball speeds in units */
 const SPD = {run:SPEED.sprint, dribble:SPEED.sprint*.78, pass:SPEED.pass, shot:SPEED.shot, air:SPEED.pass, dive:9};
 /* time to run a leg; an Extra Effort leg goes at EE speed for its first 1.5 s, then back to sprint speed */
 function legTime(len, speed, ee){
@@ -1222,7 +1224,7 @@ function planCombo(f, pl, carrier, nearest){
   for (const q of plan){
     const prevQ = plan[plan.indexOf(q) - 1], settle = prevQ && prevQ.air && prevQ.recv === q.passer && prevQ.k === q.j && (prevQ.s.recv || 'control') !== 'volley' ? .18 : 0;
     const sMin = (q.passer ? runTo(q.passer, q.j) : 0) + settle;
-    const pd = Math.max(.08, pathLen(q.pts)/(q.air ? SPD.air : (!q.dive && goalAt(q.pts[q.pts.length - 1])) || q.shot ? SPD.shot : SPD.pass));
+    const pd = Math.max(.08, pathLen(q.pts)/(q.air ? SPD.air : (!q.dive && goalAt(q.pts[q.pts.length - 1])) || q.shot || q.s.shot ? SPD.shot : SPD.pass));
     let m = sMin + pd;
     if (q.dive){ /* the keeper times the jump to meet the ball; the shot is never held back for them */
       const g = L[q.recv][0]; g.t1 = m; g.t0 = Math.max(ct[q.recv] || 0, m - g.d); ci[q.recv] = 1; ct[q.recv] = m;
@@ -1274,7 +1276,7 @@ function planCombo(f, pl, carrier, nearest){
       else if (q.recv){ const rp = at(q.recv, t1), d = endDir(q.pts), sg2 = q.self ? 1 : -1; E = {x:rp.x + sg2*d.x*FOOT, y:rp.y + sg2*d.y*FOOT}; }
       const into = !q.dive && goalAt(q.pts[q.pts.length - 1]); if (into) E = {x:into.x, y:into.y};
       const pts = q.air ? airArc([S.x, S.y], [E.x, E.y]) : [[S.x, S.y], ...q.pts.slice(1, -1), [E.x, E.y]];
-      tl.ball.push({k:'fly', lin:1, sid:q.s.id || null, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
+      tl.ball.push({k:'fly', lin:1, sid:q.s.id || null, strike:!!q.s.shot, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
       lastBall = E;
     }
   }
@@ -1975,6 +1977,17 @@ function drawAirBank(c, s, b, k){
   const tag = blk ? 'BLOCKED ON LIFT' : contested ? 'CONTESTED' : (s.recv === 'volley' ? 'VOLLEY' : 'CONTROL');
   fieldText(c, tag, t[0] + d.x*2.4, t[1] + d.y*2.4 - .2, 1, blk ? '#ff5d5d' : contested ? '#f2b33d' : '#ffffff');
 }
+/* shots: solid and heavier than a pass, with short power ticks across the line */
+function drawShotLine(c, s, k){
+  const body = trimEnd(s.pts, .95);
+  if (!s.trimmed) drawNoTouch(c, s.pts);
+  polyline(c, body); c.setLineDash([]); c.lineWidth = .62; c.strokeStyle = k; c.stroke();
+  const d = densify(body, .4), L = d[d.length - 1].d;
+  c.beginPath(); for (let x = 1.6; x < L - 1.2; x += 1.6){ const q = d.find(v => v.d >= x) || d[d.length - 1], nx = -q.ty, ny = q.tx;
+    c.moveTo(q.x + nx*.55 - q.tx*.25, q.y + ny*.55 - q.ty*.25); c.lineTo(q.x - nx*.55 + q.tx*.25, q.y - ny*.55 + q.ty*.25); }
+  c.lineWidth = .2; c.stroke();
+  arrowHead(c, s.pts, k, 1.8);
+}
 function drawAirPass(c, s, k){
   const a = s.pts[0], b = s.pts[s.pts.length-1];
   const pos = scenePos || frame().pos, sf = sceneFrame || frame();
@@ -2111,6 +2124,7 @@ function drawShape(c, s, alpha, selected){
     case 'pen': { const w = penWidth(s); polyline(c, s.pts); c.lineWidth = w; c.strokeStyle = s.clear ? rgba(k, .42) : k;
       if (s.dots) c.setLineDash([.01, w*2.3 + .25]); c.stroke(); c.setLineDash([]); break; }
     case 'arrow': {
+      if (s.style === 'pass' && s.shot){ drawShotLine(c, s, k); break; }
       if (s.style === 'pass' && s.air){ drawAirPass(c, s, k); break; }
       if (s.style === 'run' && passCfg.runSame){ const f = sceneFrame || frame(), lim = runLimitS(s, f);
         if (pathLen(s.pts) > lim + .05){ const e = s.pts[s.pts.length-1], d = endDir(s.pts); fieldText(c, 'OVER MAX', e[0] + d.x*2.6, e[1] + d.y*2.6, .95, '#ff5d5d'); } }
@@ -2659,7 +2673,7 @@ function stepKicks(fa, fb){
     const bs = fb.tl.ball;
     bs.forEach((b, i) => { if (b.k !== 'fly' || b.deflect) return; const prev = bs[i-1], id = prev && prev.k === 'with' ? prev.id : null; if (!id) return;
       const a = P(b.pts[0]), n = P(b.pts[Math.min(b.pts.length - 1, b.air ? 3 : 1)]);
-      out.push({id, at:b.t0, dir:Math.atan2(n.y - a.y, n.x - a.x), pow:b.shot ? 1.25 : b.air ? 1.05 : .85, air:!!b.air, pt:a}); });
+      out.push({id, at:b.t0, dir:Math.atan2(n.y - a.y, n.x - a.x), pow:b.shot || b.strike ? 1.25 : b.air ? 1.05 : .85, air:!!b.air, pt:a}); });
     return out;
   }
   if (!fb.ballPass || !fa.pos.ball || !fb.pos.ball) return out;
@@ -2915,7 +2929,7 @@ function drawTween(t){
 /* combo step: passes go off one after another, each with its own kick sound and height */
 function drawTweenTL(fa, fb, t){
   const tl = fb.tl, flies = tl.ball.filter(b => b.k === 'fly');
-  while ((anim.fired | 0) < flies.length && t >= flies[anim.fired | 0].t0){ const b = flies[anim.fired | 0]; anim.fired = (anim.fired | 0) + 1; sfx(b.deflect ? 'wall' : b.shot ? 'shot' : b.air ? 'air' : 'pass'); }
+  while ((anim.fired | 0) < flies.length && t >= flies[anim.fired | 0].t0){ const b = flies[anim.fired | 0]; anim.fired = (anim.fired | 0) + 1; sfx(b.deflect ? 'wall' : b.shot || b.strike ? 'shot' : b.air ? 'air' : 'pass'); }
   const pos = tweenPos(fa, fb, t);
   followCam(pos);
   const bb = tlBall(tl, fa, t), b = bb && bb.b;
@@ -3029,7 +3043,7 @@ function snapStart(p){
   const pos = frame().pos; let best = null, bd = 2.2 + slop(p);
   for (const q of doc.pieces){ if (q.team !== 'ball' && !doc.show[q.team]) continue; const d = dist(pos[q.id], p); if (d < bd){ bd = d; best = pos[q.id]; } }
   /* combos: start a run, dribble or pass from the end of another arrow (a little less pull than a player) */
-  if (['run', 'dribble', 'pass', 'air', 'bank'].includes(tool)) for (const s of frame().shapes){
+  if (['run', 'dribble', 'pass', 'shot', 'air', 'bank'].includes(tool)) for (const s of frame().shapes){
     if (s.type === 'dive'){ const d = dist(P(s.t), p) + .2; if (d < bd){ bd = d; best = P(s.t); } continue; }
     if (s.type !== 'arrow' && s.type !== 'bank') continue;
     const e = s.type === 'bank' ? P(passPts(s)[passPts(s).length - 1]) : P(s.pts[s.pts.length - 1]), d = dist(e, p);
@@ -3148,6 +3162,7 @@ cv.addEventListener('pointerdown', e => {
   if (tool === 'run' || tool === 'dribble') draft = {type:'arrow', style:tool, pts:[[sp.x, sp.y]], color};
   if (tool === 'run' && draft){ const rp = runnerAt([sp.x, sp.y], f); draft.runner = rp ? rp.id : null; draft.limit = runLimit(rp, f); }
   else if (tool === 'pen') draft = {type:'pen', pts:[[p.x, p.y]], color, ...penProps()};
+  else if (tool === 'shot') draft = {type:'arrow', style:'pass', shot:true, pts:[[sp.x, sp.y], [sp.x, sp.y]], color};
   else if (tool === 'pass') draft = {type:'arrow', style:'pass', pts:[[sp.x, sp.y], [sp.x, sp.y]], color, ...(touchMods.air ? {air:true, recv:touchMods.volley ? 'volley' : 'control'} : {})};
   else if (tool === 'air') draft = {type:'arrow', style:'pass', air:true, recv:touchMods.volley ? 'volley' : 'control', pts:[[sp.x, sp.y], [sp.x, sp.y]], color};
   else if (tool === 'bank'){ draft = {type:'bank2', stage:1, a:[sp.x, sp.y], cur:[sp.x, sp.y], color, air:e.shiftKey || touchMods.loft}; }
@@ -3217,7 +3232,7 @@ function endPointer(){
       else if (d.stage === 2){ d.awaitClick = true; draft = d; draw(); toast(touchInput ? 'Drag to set how far it rebounds, then lift your finger.' : 'Move along the rebound to set its length, then click. Slide along the wall or right-click to re-aim. Esc cancels.'); return; }
       else toast(d.blocked ? 'A ground pass into the goal mouth goes in. Press Shift to loft it off the glass.' : 'Drag the pass all the way to a wall to bounce it.');
     }
-    if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.air){ sh.air = true; sh.recv = d.recv; } } }
+    if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.shot) sh.shot = true; else if (d.air){ sh.air = true; sh.recv = d.recv; } } }
     else if (d.type === 'arrow' || d.type === 'pen'){ const pts = processStroke(d.pts, d.type === 'pen'); if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color, ...(d.ee && d.style !== 'pass' ? {ee:true} : {})}; }
     else if (d.type === 'bank'){ if (Math.hypot(d.t[0] - d.a[0], d.t[1] - d.a[1]) > 2) sh = {type:'bank', a:r2(d.a), t:r2(d.t), wall:d.wall || autoWall(d.a, d.t, d.air), color:d.color}; if (d.air){ sh.air = true; sh.recv = 'control'; } }
     else if (d.type === 'rect'){ if (d.w > 1 && d.h > 1) sh = {type:'rect', x:d.x, y:d.y, w:d.w, h:d.h, color:d.color}; }
@@ -3301,11 +3316,12 @@ function openMenu(x, y, items){
 document.addEventListener('pointerdown', e => { if (!cm.hidden && !cm.contains(e.target)) closeMenu(); }, true);
 function editShape(id, fn){ const s = frame().shapes.find(x => x.id === id); if (!s) return; snapshot(); fn(s); commit(); }
 function shapeMenu(s){
-  const name = s.type === 'bank' ? (s.air ? 'Aerial wall pass' : 'Wall pass') : s.air ? 'Aerial pass' : SHAPE_NAMES[s.style] || SHAPE_NAMES[s.type] || 'Drawing';
+  const name = s.type === 'bank' ? (s.air ? 'Aerial wall pass' : 'Wall pass') : s.shot ? 'Shot' : s.air ? 'Aerial pass' : SHAPE_NAMES[s.style] || SHAPE_NAMES[s.type] || 'Drawing';
   const items = [{title:name}, {colors:true, current:s.color, pick:c => editShape(s.id, x => { x.color = c; })}];
   if (s.type === 'dive'){ items.push({segment:[['catch', 'Catch'], ['deflect', 'Deflect'], ['miss', 'Miss']], current:s.mode || 'catch', pick:v => editShape(s.id, x => { x.mode = v; })}, {label:'Re-aim the jump', run:() => startDive(s.gk, s.id)}); }
   if (s.type === 'arrow') items.push({segment:[['run','Run'],['pass','Pass'],['dribble','Dribble']], current:s.style, pick:v => editShape(s.id, x => { x.style = v; if (v === 'pass') x.pts = [x.pts[0], x.pts[x.pts.length-1]]; else { delete x.air; delete x.recv; } })});
-  if (s.type === 'arrow' && s.style === 'pass'){
+  if (s.type === 'arrow' && s.style === 'pass') items.push({segment:[['pass','Pass'],['shot','Shot']], current:s.shot ? 'shot' : 'pass', pick:v => editShape(s.id, x => { if (v === 'shot'){ x.shot = true; delete x.air; delete x.recv; } else delete x.shot; })});
+  if (s.type === 'arrow' && s.style === 'pass' && !s.shot){
     items.push({segment:[['ground','Ground'],['air','Aerial']], current:s.air ? 'air' : 'ground', pick:v => editShape(s.id, x => { if (v === 'air'){ x.air = true; x.recv = x.recv || 'control'; } else { delete x.air; delete x.recv; } })});
     if (s.air) items.push({segment:[['control','Control'],['volley','Volley']], current:s.recv || 'control', pick:v => editShape(s.id, x => { x.recv = v; })});
   }
@@ -4394,7 +4410,7 @@ $('#fsBtn').addEventListener('click', () => {
 });
 
 /* ---------- keyboard ---------- */
-const KEYS = {i:'air', v:'select', r:'run', p:'pass', d:'dribble', b:'bank', z:'zone', o:'circle', f:'pen', t:'text', e:'erase', u:'ruler'};
+const KEYS = {j:'shot', i:'air', v:'select', r:'run', p:'pass', d:'dribble', b:'bank', z:'zone', o:'circle', f:'pen', t:'text', e:'erase', u:'ruler'};
 document.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'){ if (e.key === 'Escape') e.target.blur(); return; }
