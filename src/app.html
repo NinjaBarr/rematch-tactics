@@ -1108,6 +1108,7 @@ function goalAt(pt){
    by the same player. A pass is timed to meet whoever is running onto it, and the ball then stays with that
    player through any dribble that follows (or goes on in another pass). Times are in "beats": 1 beat = one
    normal step of playback. */
+const EE_SPEED = 1.2; /* an Extra Effort run is a bit quicker */
 const SPD = {run:16, dribble:12.5, pass:40, air:26, dive:20};
 const FOOT = PR + BR - .2;
 const passStart = s => P(s.type === 'bank' ? s.a : s.pts[0]);
@@ -1188,7 +1189,7 @@ function planCombo(f, pl, carrier, nearest){
     plan.push({s:pick, pts, passer:holder, j:pj, recv:rid, k:rk, self, deflect, shot:!rid && !!goalAt(pts[pts.length - 1]), air:!!pick.air && pick.type !== 'bank'});
     if (!rid) break; holder = rid; from = rk;
   }
-  const isCombo = dives.length > 0 || Object.values(chains).some(c => c.length > 1) || plan.length > 1 || plan.some(q => q.passer && q.j >= 0);
+  const isCombo = dives.length > 0 || arrows.some(a => a.ee) || Object.values(chains).some(c => c.length > 1) || plan.length > 1 || plan.some(q => q.passer && q.j >= 0);
   if (!isCombo) return null;
 
   /* schedule */
@@ -1196,7 +1197,7 @@ function planCombo(f, pl, carrier, nearest){
   for (const id in chains){
     let prev = f.pos[id];
     L[id] = chains[id].map((s, i) => { const pts = [[prev.x, prev.y], ...s.pts.slice(1)]; prev = P(s.pts[s.pts.length - 1]);
-      return {pts, d:Math.max(s.style === 'dive' ? .2 : .08, pathLen(pts)/(s.style === 'dribble' ? SPD.dribble : s.style === 'dive' ? SPD.dive : SPD.run)), t0:0, t1:0, style:s.style}; });
+      return {pts, d:Math.max(s.style === 'dive' ? .2 : .08, pathLen(pts)/((s.style === 'dribble' ? SPD.dribble : s.style === 'dive' ? SPD.dive : SPD.run)*(s.ee ? EE_SPEED : 1))), t0:0, t1:0, style:s.style, ee:!!s.ee}; });
   }
   const ci = {}, ct = {};
   const runTo = (id, k) => { let t = ct[id] || 0; const legs = L[id] || []; for (let i = ci[id] || 0; i <= k && i < legs.length; i++){ legs[i].t0 = t; t += legs[i].d; legs[i].t1 = t; ci[id] = i + 1; } ct[id] = t; return t; };
@@ -1231,7 +1232,7 @@ function planCombo(f, pl, carrier, nearest){
   if (hold) segs.push({k:'with', id:hold, t0:tHold, t1:T});
   const tracks = {};
   for (const id in L){
-    const legs = L[id].map(g => ({pts:g.pts.map(r2), t0:g.t0/T, t1:g.t1/T, style:g.style}));
+    const legs = L[id].map(g => ({pts:g.pts.map(r2), t0:g.t0/T, t1:g.t1/T, style:g.style, ...(g.ee ? {ee:1} : {})}));
     legs.forEach((g, i) => { g.ei = i === 0 || legs[i-1].t1 < g.t0 - 1e-4 ? 1 : 0; g.eo = i === legs.length - 1 || legs[i+1].t0 > g.t1 + 1e-4 ? 1 : 0; });
     tracks[id] = legs;
   }
@@ -2067,9 +2068,12 @@ function drawShape(c, s, alpha, selected){
       if (s.dots) c.setLineDash([.01, w*2.3 + .25]); c.stroke(); c.setLineDash([]); break; }
     case 'arrow': {
       if (s.style === 'pass' && s.air){ drawAirPass(c, s, k); break; }
-      if (s.style === 'run' && passCfg.runSame){ const f = sceneFrame || frame(), lim = runLimit(runnerAt(s.pts[0], f), f);
+      if (s.style === 'run' && passCfg.runSame){ const f = sceneFrame || frame(), lim = runLimitS(s, f);
         if (pathLen(s.pts) > lim + .05){ const e = s.pts[s.pts.length-1], d = endDir(s.pts); fieldText(c, 'OVER MAX', e[0] + d.x*2.6, e[1] + d.y*2.6, .95, '#ff5d5d'); } }
       const body = s.style === 'dribble' ? wavy(trimEnd(s.pts, .85)) : trimEnd(s.pts, .85);
+      if (s.ee){ polyline(c, body); c.setLineDash([]); c.lineWidth = 1.05; c.strokeStyle = 'rgba(90,205,255,.33)'; c.stroke(); c.lineWidth = .62; c.strokeStyle = 'rgba(150,235,255,.55)'; c.stroke();
+        const a = s.pts[0], b = s.pts[Math.min(1, s.pts.length - 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1])/L, ny = (b[0] - a[0])/L;
+        fieldText(c, 'EE', a[0] + (b[0] - a[0])/L*2.2 + nx*1.2, a[1] + (b[1] - a[1])/L*2.2 + ny*1.2, .9, '#9fe8ff', `800 20px ${FD}`); }
       if (s.style === 'pass') drawNoTouch(c, s.pts);
       polyline(c, body); c.lineWidth = .36; c.strokeStyle = k;
       if (s.style === 'pass'){ c.setLineDash(DOTS); c.lineWidth = .42; } else c.setLineDash([]);
@@ -2311,7 +2315,7 @@ function renderScene(c, pos, layers, o = {}){
   if (o.pieces) o.pieces(pos, kf); else drawPiecesLocal(c, pos, kf, o);
   return {lanes, shots};
 }
-const playerArgs = (p, pos, kf, o) => [o.active === p.id, keeperRole(kf, p, pos), inStance(kf, p.id) ? facing(p, pos, kf) : null, o.handleId === p.id, hasEE(o.eeFrame !== undefined ? o.eeFrame : kf, p.id)];
+const playerArgs = (p, pos, kf, o) => [o.active === p.id, keeperRole(kf, p, pos), inStance(kf, p.id) ? facing(p, pos, kf) : null, o.handleId === p.id, hasEE(o.eeFrame !== undefined ? o.eeFrame : kf, p.id) || !!(motionNow && motionNow[p.id] && motionNow[p.id].ee)];
 function drawPiecesLocal(c, pos, kf, o){
   const M = motionNow;
   for (const p of doc.pieces) if (p.team !== 'ball' && doc.show[p.team]){
@@ -2641,6 +2645,7 @@ function buildMotion(pos, now, live){
     const drib = A > .05 && !ballFly && pos.ball && Math.hypot(bx, by) < 2.1;
     const m = {A, ph:(mo.dist[id] || 0)/STRIDE*Math.PI, dir, drib, ballSide:dir == null ? 1 : Math.sign(Math.cos(dir)*by - Math.sin(dir)*bx) || 1};
     if (live && live.ee && hasEE(live.ee, id)) m.ee = {t:live.t || 0};
+    else if (live && live.tl && live.tl.tracks[id]) for (const g of live.tl.tracks[id]) if (g.ee && live.t >= g.t0 && live.t <= g.t1 + .02){ m.ee = {t:(live.t - g.t0)/((g.t1 - g.t0) || 1)*.6}; break; }
     if (live && live.tl && live.tl.tracks[id]) for (const g of live.tl.tracks[id]) if (g.style === 'dive' && live.t >= g.t0){
       const a = P(g.pts[0]), z = P(g.pts[g.pts.length - 1]);
       m.dive = {u:clamp((live.t - g.t0)/((g.t1 - g.t0) || 1), 0, 1), dir:Math.atan2(z.y - a.y, z.x - a.x)}; m.A = 0; }
@@ -3150,7 +3155,7 @@ function endPointer(){
       else toast(d.blocked ? 'A ground pass into the goal mouth goes in. Press Shift to loft it off the glass.' : 'Drag the pass all the way to a wall to bounce it.');
     }
     if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.air){ sh.air = true; sh.recv = d.recv; } } }
-    else if (d.type === 'arrow' || d.type === 'pen'){ const pts = processStroke(d.pts, d.type === 'pen'); if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color}; }
+    else if (d.type === 'arrow' || d.type === 'pen'){ const pts = processStroke(d.pts, d.type === 'pen'); if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color, ...(d.ee && d.style !== 'pass' ? {ee:true} : {})}; }
     else if (d.type === 'bank'){ if (Math.hypot(d.t[0] - d.a[0], d.t[1] - d.a[1]) > 2) sh = {type:'bank', a:r2(d.a), t:r2(d.t), wall:d.wall || autoWall(d.a, d.t, d.air), color:d.color}; if (d.air){ sh.air = true; sh.recv = 'control'; } }
     else if (d.type === 'rect'){ if (d.w > 1 && d.h > 1) sh = {type:'rect', x:d.x, y:d.y, w:d.w, h:d.h, color:d.color}; }
     else if (d.type === 'circle'){ if (d.r > .8) sh = {type:'circle', cx:d.cx, cy:d.cy, r:d.r, color:d.color}; }
@@ -3241,8 +3246,9 @@ function shapeMenu(s){
     items.push({segment:[['ground','Ground'],['air','Aerial']], current:s.air ? 'air' : 'ground', pick:v => editShape(s.id, x => { if (v === 'air'){ x.air = true; x.recv = x.recv || 'control'; } else { delete x.air; delete x.recv; } })});
     if (s.air) items.push({segment:[['control','Control'],['volley','Volley']], current:s.recv || 'control', pick:v => editShape(s.id, x => { x.recv = v; })});
   }
+  if (s.type === 'arrow' && s.style !== 'pass') items.push({label:'Extra Effort on this run', key:'Q', checked:!!s.ee, run:() => editShape(s.id, x => { if (x.ee) delete x.ee; else x.ee = true; })});
   if (s.type === 'arrow' && s.style === 'run'){
-    const f = frame(), lim = runLimit(runnerAt(s.pts[0], f), f);
+    const f = frame(), lim = runLimitS(s, f);
     if (passCfg.runSame && pathLen(s.pts) > lim + .05) items.push({label:'Trim to max run', run:() => editShape(s.id, x => { x.pts = capPath(x.pts, lim).map(r2); })});
     items.push({label:'Use this as the max run', run:() => { snapshot(); frame().runMax = baseFromRun(s, frame()); if (!passCfg.runSame){ passCfg.runSame = true; $('#runSame').checked = true; saveSettings(); } commit(); }});
   }
@@ -3588,6 +3594,8 @@ function buildPassUI(){
 const runnerAt = (pt, f) => { let best = null, bd = REACH; for (const p of players()){ const d = dist(f.pos[p.id], P(pt)); if (d < bd){ bd = d; best = p; } } return best; };
 const eeExtra = (p, f) => p && hasEE(f, p.id) ? passCfg.eeAdd : 0;
 function runLimit(p, f){ return passCfg.runSame && f.runMax > 0 ? f.runMax + eeExtra(p, f) : Infinity; }
+/* a run with its own Extra Effort gets the bonus even if the player doesn't have EE for the whole step */
+function runLimitS(s, f){ const rp = runnerAt(s.pts[0], f), lim = runLimit(rp, f); return lim < Infinity && s.ee && !(rp && hasEE(f, rp.id)) ? lim + passCfg.eeAdd : lim; }
 function baseFromRun(s, f){ return Math.round(Math.max(1, pathLen(s.pts) - eeExtra(runnerAt(s.pts[0], f), f))*100)/100; }
 function syncRunUI(){
   const out = $('#runMaxOut'); if (!out) return; const f = frame();
@@ -4377,8 +4385,8 @@ function draftKey(k, e){
     if (draft.type === 'bank2' && draft.stage === 1 && draft.last) bankAim(draft, draft.last);
     draw(); return true; }
   if (k === 'v' && isPass && draft.air){ draft.recv = draft.recv === 'volley' ? 'control' : 'volley'; draw(); return true; }
-  if (k === 'q' && draft.type === 'arrow' && draft.style === 'run' && draft.runner){
-    const d = draft; toggleEE(d.runner); draft = d; d.limit = runLimit(piece(d.runner), frame());
+  if (k === 'q' && draft.type === 'arrow' && (draft.style === 'run' || draft.style === 'dribble')){
+    const d = draft; d.ee = !d.ee; const rp = d.runner && piece(d.runner); d.limit = runLimit(rp, frame()); if (d.ee && d.limit < Infinity && !(rp && hasEE(frame(), rp.id))) d.limit += passCfg.eeAdd;
     if (d.limit < Infinity && pathLen(d.pts) > d.limit){ d.pts = capPath(d.pts, d.limit); d.full = true; } else d.full = false;
     draw(); return true; }
   return false;
@@ -4392,7 +4400,7 @@ function ktipRows(){
   if (draft){
     if (draft.type === 'bank2') return K('Shift', draft.air ? 'Lofted · Shift for ground' : 'Loft it', draft.air) + (draft.stage === 2 ? K('⌫', 'Re-aim') : '') + K('Esc', 'Cancel');
     if (draft.type === 'arrow' && draft.style === 'pass') return K('Shift', draft.air ? 'Aerial · Shift for ground' : 'Make it aerial', draft.air) + (draft.air ? K('V', (draft.recv === 'volley' ? 'Volley' : 'Control') + ' · V to switch', true) : '') + K('Esc', 'Cancel');
-    if (draft.type === 'arrow' && draft.style === 'run' && draft.runner){ const ee = !!(f.ee && f.ee[draft.runner]); return K('Q', ee ? 'Extra Effort on' : 'Extra Effort', ee) + K('Esc', 'Cancel'); }
+    if (draft.type === 'arrow' && (draft.style === 'run' || draft.style === 'dribble')){ const ee = !!draft.ee; return K('Q', ee ? 'Extra Effort on this run' : 'Extra Effort on this run', ee) + K('Esc', 'Cancel'); }
     return K('Esc', 'Cancel');
   }
   if (drag || ruler && ruler.active) return '';
