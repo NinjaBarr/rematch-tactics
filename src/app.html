@@ -1615,6 +1615,64 @@ cv.addEventListener('pointermove', e => {
   if (!(anim.phase === 'move')) draw();
 }, true);
 for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, e => { if (otsLook && e.pointerId === otsLook.id){ otsLook = null; cv.style.cursor = ''; e.stopImmediatePropagation(); } }, true);
+/* Controller support (standard layout: Xbox / PlayStation / most USB pads)
+   A / Cross or Start: play / pause    B / Circle: stop    D-pad left / right: step back / forward
+   LB / RB: follow previous / next (ball, then the 10 players)    LT / RT: slower / faster
+   Y / Triangle: over-the-shoulder on/off    X / Square: focus on/off    R3: re-centre the look
+   Right stick: look around in over-the-shoulder, otherwise up/down zooms    Left stick: pan the board */
+const pad = {raf:0, prev:[], idx:null, last:0};
+const PAD_DEAD = .18, padAxis = v => Math.abs(v) < PAD_DEAD ? 0 : (v - Math.sign(v)*PAD_DEAD)/(1 - PAD_DEAD);
+function padFollowList(){ return ['ball', ...['home', 'away'].flatMap(t => doc.pieces.filter(p => p.team === t).slice(0, 5)).map(p => p.id)]; }
+function padCycleFollow(dir){
+  const L = padFollowList(), at = followBall ? L.indexOf(followId) : -1, n = at < 0 ? (dir > 0 ? 0 : L.length - 1) : (at + dir + L.length) % L.length;
+  setFollow(true, L[n]);
+}
+function padSpeed(dir){
+  const sel = $('#speed'), vals = [...sel.options].map(o => +o.value), i = vals.indexOf(speed), n = clamp((i < 0 ? vals.indexOf(1) : i) + dir, 0, vals.length - 1);
+  speed = vals[n]; sel.value = String(speed); saveSettings(); toast(`Playback ${speed}×`);
+}
+function padButton(b){
+  if (!doc) return;
+  if (b === 0 || b === 9) anim.playing ? stopPlay() : startPlay();
+  else if (b === 1) stopPlay();
+  else if (b === 14) goStep(cur - 1);
+  else if (b === 15) goStep(cur + 1);
+  else if (b === 12) goStep(0);
+  else if (b === 13) goStep(doc.frames.length - 1);
+  else if (b === 4) padCycleFollow(-1);
+  else if (b === 5) padCycleFollow(1);
+  else if (b === 6) padSpeed(-1);
+  else if (b === 7) padSpeed(1);
+  else if (b === 3) $('#otsBtn').click();
+  else if (b === 2) $('#focusBtn').click();
+  else if (b === 11 && ots){ ots.manual = false; ots.pitch = 0; if (anim.phase !== 'move') draw(); }
+}
+function padTick(now){
+  pad.raf = 0;
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [], g = gp.find(x => x.index === pad.idx) || gp[0];
+  if (!g){ pad.prev = []; return; }
+  pad.idx = g.index;
+  const dt = Math.min(.05, pad.last ? (now - pad.last)/1000 : 0); pad.last = now;
+  const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox';
+  g.buttons.forEach((bt, i) => { const on = bt.pressed || bt.value > .5; if (on && !pad.prev[i] && !typing) padButton(i); pad.prev[i] = on; });
+  const lx = padAxis(g.axes[0] || 0), ly = padAxis(g.axes[1] || 0), rx = padAxis(g.axes[2] || 0), ry = padAxis(g.axes[3] || 0);
+  if (doc && !typing && dt){
+    if (otsActive() && ots && (rx || ry)){
+      ots.manual = true;
+      ots.h += rx*Math.abs(rx)*2.6*dt;                                         /* ~150°/s at full tilt, gentle near the middle */
+      ots.pitch = clamp((ots.pitch || 0) - ry*Math.abs(ry)*60*dt, OTS.pitchMin, OTS.pitchMax); /* stick up looks up */
+      if (anim.phase !== 'move') draw();
+    } else if (!otsActive()){
+      if (ry) zoomAt(cam.z*Math.exp(-ry*1.6*dt));
+      if ((lx || ly) && !(anim.playing && followBall)){ const c = hApply(Hfit, cam.cx, cam.cy), sp = 520*dt; panTo(c, -lx*sp*cam.z, -ly*sp*cam.z); }
+    }
+  }
+  pad.raf = requestAnimationFrame(padTick);
+}
+function padStart(){ if (!pad.raf){ pad.last = 0; pad.raf = requestAnimationFrame(padTick); } }
+addEventListener('gamepadconnected', e => { pad.idx = e.gamepad.index; padStart(); toast('Controller connected — A plays, D-pad steps, bumpers pick who to follow, Y for over-the-shoulder.'); });
+addEventListener('gamepaddisconnected', e => { if (pad.idx === e.gamepad.index) pad.idx = null; toast('Controller disconnected.'); });
+if (navigator.getGamepads && [...navigator.getGamepads()].some(Boolean)) padStart();
 function applyView(){
   if (otsActive() && ots){ applyOTS(); syncZoomUI(); return; }
   if (camv && camv.ots) camv = viewParams(viewId, viewFlip);
