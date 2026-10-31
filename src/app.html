@@ -1565,37 +1565,56 @@ function toScreen(p){ const q = hApply(Hf, p.x, p.y); return {x:q.x, y:q.y}; }
    cam.z zooms into the fitted view around cam.(cx, cy), a pitch point kept at the stage centre. */
 let cam = {z:1, cx:W/2, cy:H/2}, followBall = false, followId = 'ball', pan = null, pinch = null;
 const ZMAX = 6, pointers = new Map();
-/* Over-the-shoulder: during playback the camera rides behind the followed player, a little above head height,
-   looking where they are heading, like the in-game camera. */
-let otsOn = false, ots = null;
-const OTS = {tilt:76, h:3.6, back:5.4, fov:36, cy:.44};
+/* Over-the-shoulder: during playback the camera rides behind the followed player like the in-game camera:
+   over the right shoulder, about 7.5 units back and 2.9 up, pitched ~4° down, ~90° wide (matched to Joseph's screenshots).
+   Drag on the pitch while it plays to look around (left/right turns the camera, up/down aims it). */
+let otsOn = false, ots = null, otsLook = null;
+const OTS = {dist:7.5, side:.9, h:2.9, tilt:86, fov:90, pitchMin:-8, pitchMax:24};
 const otsActive = () => otsOn && anim.playing && followBall && followId !== 'ball' && !!piece(followId) && glReady();
 function otsUpdate(pos, snap){
   const id = followId, q = pos[id]; if (!q) return;
   if (!ots || ots.id !== id || snap){ const pc = piece(id), b = pos.ball, toward = b && dist(b, q) > 3 ? Math.atan2(b.y - q.y, b.x - q.x) : (pc.team === 'home' ? 0 : Math.PI);
-    ots = {id, x:q.x, y:q.y, h:toward}; }
+    ots = {id, x:q.x, y:q.y, h:toward, pitch:0, manual:false}; }
   const mo = anim.mo, d = mo && mo.dir && mo.dir[id], spd = mo && mo.spd ? mo.spd[id] || 0 : 0;
-  if (d != null && spd > 1.5) ots.h = lerpAng(ots.h, d, .06);
+  if (!ots.manual && d != null && spd > 1.5) ots.h = lerpAng(ots.h, d, .06);
   ots.x = q.x; ots.y = q.y;
 }
 function applyOTS(){
-  const th = OTS.tilt*Math.PI/180, D = OTS.h/Math.cos(th), fx = Math.cos(ots.h), fy = Math.sin(ots.h), ahead = D*Math.sin(th) - OTS.back;
-  const tx = ots.x + fx*ahead, ty = ots.y + fy*ahead, a = Math.atan2(-fx, -fy);
+  const th = OTS.tilt*Math.PI/180, D = OTS.h/Math.cos(th), fx = Math.cos(ots.h), fy = Math.sin(ots.h), rx = -fy, ry = fx;
+  const cx = ots.x - fx*OTS.dist + rx*OTS.side, cy0 = ots.y - fy*OTS.dist + ry*OTS.side; /* camera over the right shoulder */
+  const ahead = D*Math.sin(th), tx = cx + fx*ahead, ty = cy0 + fy*ahead, a = Math.atan2(-fx, -fy);
   camv = {yaw:a*180/Math.PI, tilt:OTS.tilt, D, region:[tx - 1, ty - 1, tx + 1, ty + 1], ots:true};
-  const P = projH(camv), k = (base.w/2)/(D*Math.tan(OTS.fov*Math.PI/180)), S = [k, 0, base.w/2, 0, k, base.h*OTS.cy, 0, 0, 1];
+  const f = (base.w/2)/Math.tan(OTS.fov/2*Math.PI/180), k = f/D;
+  const sy = base.h/2 + f*Math.tan((ots.pitch || 0)*Math.PI/180); /* aiming up/down slides the view, like tilting the camera */
+  const P = projH(camv), S = [k, 0, base.w/2, 0, k, sy, 0, 0, 1];
   Hfit = Hf = hMul(S, P); Hinv = hInv(Hf);
   cam3 = {S, cs:Math.cos(a), sn:Math.sin(a), st:Math.sin(th), ct:Math.cos(th), D, tx, ty};
   q3d = 1;
 }
-function endOTS(){ if (camv && camv.ots){ camv = viewParams(viewId, viewFlip); applyView(); } }
-/* the in-game crosshair: two small brackets just above the middle of the screen */
+function endOTS(){ otsLook = null; if (camv && camv.ots){ camv = viewParams(viewId, viewFlip); applyView(); } }
+/* the in-game crosshair: two thin cyan brackets, a little above the middle of the screen */
 function drawCrosshair(){
-  const c = ctx, x = base.w/2, y = base.h*.36, r = Math.max(9, base.w*.012);
-  c.save(); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.lineCap = 'round'; c.lineWidth = 2.2; c.strokeStyle = 'rgba(80,235,230,.95)'; c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 3;
-  c.beginPath(); c.arc(x + r*.55, y, r, Math.PI*.78, Math.PI*1.22); c.stroke();
-  c.beginPath(); c.arc(x - r*.55, y, r, -Math.PI*.22, Math.PI*.22); c.stroke();
+  const c = ctx, x = base.w/2, y = base.h*.38, hgt = Math.max(10, base.h*.022), gap = Math.max(9, base.w*.0105), bow = hgt*.32;
+  c.save(); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.lineCap = 'round'; c.lineWidth = Math.max(1.6, base.h*.0024);
+  c.shadowColor = 'rgba(40,230,225,.75)'; c.shadowBlur = 5; c.strokeStyle = '#3fe9e2';
+  for (const sd of [-1, 1]){ const x0 = x + sd*gap;
+    c.beginPath(); c.moveTo(x0, y - hgt/2); c.quadraticCurveTo(x0 + sd*bow, y, x0, y + hgt/2); c.stroke(); }
   c.restore();
 }
+/* drag to look around while riding along */
+cv.addEventListener('pointerdown', e => {
+  if (!otsActive() || e.button > 0 || !ots) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  otsLook = {id:e.pointerId, x:e.clientX, y:e.clientY, h:ots.h, p:ots.pitch || 0}; ots.manual = true; cv.style.cursor = 'grabbing';
+  try { cv.setPointerCapture(e.pointerId); } catch {}
+}, true);
+cv.addEventListener('pointermove', e => {
+  if (!otsLook || e.pointerId !== otsLook.id || !ots) return; e.stopImmediatePropagation();
+  ots.h = otsLook.h + (e.clientX - otsLook.x)*.0055;
+  ots.pitch = clamp(otsLook.p - (e.clientY - otsLook.y)*.18, OTS.pitchMin, OTS.pitchMax); /* mouse up looks up */
+  if (!(anim.phase === 'move')) draw();
+}, true);
+for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, e => { if (otsLook && e.pointerId === otsLook.id){ otsLook = null; cv.style.cursor = ''; e.stopImmediatePropagation(); } }, true);
 function applyView(){
   if (otsActive() && ots){ applyOTS(); syncZoomUI(); return; }
   if (camv && camv.ots) camv = viewParams(viewId, viewFlip);
