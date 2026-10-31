@@ -817,10 +817,12 @@ const r2 = p => [Math.round(p[0]*100)/100, Math.round(p[1]*100)/100];
 function processStroke(pts, keepShape){
   if (pts.length < 2 || pathLen(pts) < 1.5) return null;
   if (!keepShape){
+    /* drop the jitter right next to a snapped start so the line doesn't kink there */
+    const s0 = P(pts[0]); pts = [pts[0]].concat(pts.slice(1, -1).filter(q => dist(P(q), s0) > .7), [pts[pts.length-1]]);
     const a = P(pts[0]), b = P(pts[pts.length-1]); let dev = 0;
     for (const q of pts) dev = Math.max(dev, segDist(P(q), a, b).d);
-    if (dev < 1.0) return [r2(pts[0]), r2(pts[pts.length-1])];
-    return chaikin(rdp(pts, .35), 2).map(r2);
+    if (dev < .45) return [r2(pts[0]), r2(pts[pts.length-1])]; /* only a genuinely straight stroke becomes a straight line */
+    return chaikin(rdp(pts, .12), 2).map(r2); /* follow the stroke closely: no new corners */
   }
   return chaikin(rdp(pts, .15), 1).map(r2);
 }
@@ -1212,7 +1214,7 @@ function planCombo(f, pl, carrier, nearest){
       const ee = !!s.ee || (i === 0 && s.style !== 'dive' && hasEE(f, id)); /* step-wide EE starts with their first move */
       const d = Math.max(s.style === 'dive' ? .3 : .05, legTime(len, sp, ee));
       const eeLen = SPEED.ee*SPEED.eeSecs*(sp/SPEED.sprint), split = ee && len > eeLen ? {ft:SPEED.eeSecs/d, fd:eeLen/len} : null;
-      return {pts, d, t0:0, t1:0, style:s.style, ee, split}; });
+      return {pts, d, t0:0, t1:0, style:s.style, ee, split, sid:s.dive ? s.dive.id : s.id}; });
   }
   const ci = {}, ct = {};
   const runTo = (id, k) => { let t = ct[id] || 0; const legs = L[id] || []; for (let i = ci[id] || 0; i <= k && i < legs.length; i++){ legs[i].t0 = t; t += legs[i].d; legs[i].t1 = t; ci[id] = i + 1; } ct[id] = t; return t; };
@@ -1247,7 +1249,7 @@ function planCombo(f, pl, carrier, nearest){
   if (hold) segs.push({k:'with', id:hold, t0:tHold, t1:T});
   const tracks = {};
   for (const id in L){
-    const legs = L[id].map(g => ({pts:g.pts.map(r2), t0:g.t0/T, t1:g.t1/T, style:g.style, lin:1, ...(g.ee ? {ee:1, eeEnd:Math.min(g.t1, g.t0 + SPEED.eeSecs/T)} : {}), ...(g.split ? {split:g.split} : {})}));
+    const legs = L[id].map(g => ({pts:g.pts.map(r2), t0:g.t0/T, t1:g.t1/T, style:g.style, lin:1, ...(g.sid ? {sid:g.sid} : {}), ...(g.ee ? {ee:1, eeEnd:Math.min(g.t1, g.t0 + SPEED.eeSecs/T)} : {}), ...(g.split ? {split:g.split} : {})}));
     legs.forEach((g, i) => { g.ei = i === 0 || legs[i-1].t1 < g.t0 - 1e-4 ? 1 : 0; g.eo = i === legs.length - 1 || legs[i+1].t0 > g.t1 + 1e-4 ? 1 : 0; });
     tracks[id] = legs;
   }
@@ -1272,7 +1274,7 @@ function planCombo(f, pl, carrier, nearest){
       else if (q.recv){ const rp = at(q.recv, t1), d = endDir(q.pts), sg2 = q.self ? 1 : -1; E = {x:rp.x + sg2*d.x*FOOT, y:rp.y + sg2*d.y*FOOT}; }
       const into = !q.dive && goalAt(q.pts[q.pts.length - 1]); if (into) E = {x:into.x, y:into.y};
       const pts = q.air ? airArc([S.x, S.y], [E.x, E.y]) : [[S.x, S.y], ...q.pts.slice(1, -1), [E.x, E.y]];
-      tl.ball.push({k:'fly', lin:1, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
+      tl.ball.push({k:'fly', lin:1, sid:q.s.id || null, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
       lastBall = E;
     }
   }
@@ -1280,6 +1282,31 @@ function planCombo(f, pl, carrier, nearest){
 }
 /* where a player is at time t (0..1) along their legs */
 const easeIn2 = u => u*u*(2 - u), easeOut2 = u => 1 - easeIn2(1 - u);
+/* how much of each arrow has been travelled at time t (0..1), by the arrow's id */
+function legFrac(g, u){ if (!g.lin) return u; const sp = g.split; return sp ? (u < sp.ft ? u/sp.ft*sp.fd : sp.fd + (u - sp.ft)/((1 - sp.ft) || 1)*(1 - sp.fd)) : u; }
+function shapeProgress(tl, t){
+  const m = {};
+  for (const id in tl.tracks) for (const g of tl.tracks[id]){ if (!g.sid) continue;
+    m[g.sid] = g.style === 'dive' ? (t > g.t0 ? 1 : 0) : t <= g.t0 ? 0 : t >= g.t1 ? 1 : legFrac(g, (t - g.t0)/((g.t1 - g.t0) || 1)); }
+  for (const b of tl.ball){ if (b.k !== 'fly' || !b.sid) continue; const u = clamp((t - b.t0)/((b.t1 - b.t0) || 1), 0, 1); m[b.sid] = t <= b.t0 ? 0 : b.lin || b.save ? u : easeOut(u); }
+  return m;
+}
+function trimFrom(pts, f){
+  const L = pathLen(pts), want = L*f; let acc = 0;
+  for (let i = 0; i < pts.length - 1; i++){ const a = pts[i], b = pts[i+1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (acc + l >= want){ const k = l ? (want - acc)/l : 0; return [[a[0] + (b[0] - a[0])*k, a[1] + (b[1] - a[1])*k], ...pts.slice(i + 1)]; } acc += l; }
+  return pts.slice(-2);
+}
+/* this step's drawings while it plays: arrows shrink from their start as they are travelled; the rest stay until the end */
+function eatenShapes(shapes, prog){
+  const out = [];
+  for (const s of shapes){
+    const p = prog[s.id]; if (p == null || p <= .001){ out.push(s); continue; } if (p >= .999) continue;
+    if (s.type === 'arrow'){ const pts = s.style === 'pass' && s.air ? airArc(s.pts[0], s.pts[s.pts.length - 1]) : s.pts; const r = trimFrom(pts, p); if (pathLen(r) > .9) out.push({...s, air:false, trimmed:true, pts:r}); }
+    else if (s.type === 'bank'){ const r = trimFrom(passPts(s), p); if (pathLen(r) > .9) out.push({type:'arrow', style:'pass', trimmed:true, id:s.id, color:s.color, pts:r}); }
+  }
+  return out;
+}
 function legAt(legs, t, start){
   if (!legs || !legs.length) return {x:start.x, y:start.y};
   if (t <= legs[0].t0) return P(legs[0].pts[0]);
@@ -2091,7 +2118,7 @@ function drawShape(c, s, alpha, selected){
       if (s.ee){ polyline(c, body); c.setLineDash([]); c.lineWidth = 1.05; c.strokeStyle = 'rgba(90,205,255,.33)'; c.stroke(); c.lineWidth = .62; c.strokeStyle = 'rgba(150,235,255,.55)'; c.stroke();
         const a = s.pts[0], b = s.pts[Math.min(1, s.pts.length - 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1])/L, ny = (b[0] - a[0])/L;
         fieldText(c, 'EE', a[0] + (b[0] - a[0])/L*2.2 + nx*1.2, a[1] + (b[1] - a[1])/L*2.2 + ny*1.2, .9, '#9fe8ff', `800 20px ${FD}`); }
-      if (s.style === 'pass') drawNoTouch(c, s.pts);
+      if (s.style === 'pass' && !s.trimmed) drawNoTouch(c, s.pts);
       polyline(c, body); c.lineWidth = .36; c.strokeStyle = k;
       if (s.style === 'pass'){ c.setLineDash(DOTS); c.lineWidth = .42; } else c.setLineDash([]);
       c.stroke(); arrowHead(c, s.pts, k); break;
@@ -2902,7 +2929,8 @@ function drawTweenTL(fa, fb, t){
       if (isPersp()){ const a = P(b.pts[0]), z = P(b.pts[b.pts.length - 1]); pos.ball = {x:pos.ball.x + (a.x + (z.x - a.x)*e - pos.ball.x)*q3d, y:pos.ball.y + (a.y + (z.y - a.y)*e - pos.ball.y)*q3d}; ballZ = clamp(L*.12, 2, 6)*q3d*4*e*(1 - e); } }
   }
   motionNow = buildMotion(pos, performance.now(), {fly:!!(b && b.k === 'fly' && t <= b.t1), ee:fa, t, tl});
-  try { renderFrame(pos, [{shapes:fa.shapes, alpha:Math.max(0, 1 - t*1.8)}, {shapes:fb.shapes, alpha:Math.max(0, (t - .55)/.45)}], {eeFrame:fa, keeperFrame: t < .5 ? fa : fb, ballLocked, ballLift:ballLift*(1 - (isPersp() ? q3d : 0)), ballZ}); } finally { motionNow = null; }
+  const prog = shapeProgress(tl, t), moving = fa.shapes.filter(s => prog[s.id] != null), still = fa.shapes.filter(s => prog[s.id] == null);
+  try { renderFrame(pos, [{shapes:eatenShapes(moving, prog), alpha:1}, {shapes:still, alpha:Math.max(0, 1 - Math.max(0, t - .8)*5)}, {shapes:fb.shapes, alpha:Math.max(0, (t - .85)/.15)}], {eeFrame:fa, keeperFrame: t < .5 ? fa : fb, ballLocked, ballLift:ballLift*(1 - (isPersp() ? q3d : 0)), ballZ}); } finally { motionNow = null; }
   drawMini(pos);
 }
 function syncPlayBtn(){
@@ -3004,8 +3032,8 @@ function snapStart(p){
   if (['run', 'dribble', 'pass', 'air', 'bank'].includes(tool)) for (const s of frame().shapes){
     if (s.type === 'dive'){ const d = dist(P(s.t), p) + .2; if (d < bd){ bd = d; best = P(s.t); } continue; }
     if (s.type !== 'arrow' && s.type !== 'bank') continue;
-    const e = s.type === 'bank' ? P(passPts(s)[passPts(s).length - 1]) : P(s.pts[s.pts.length - 1]), d = dist(e, p) + .4;
-    if (d < bd){ bd = d; best = e; }
+    const e = s.type === 'bank' ? P(passPts(s)[passPts(s).length - 1]) : P(s.pts[s.pts.length - 1]), d = dist(e, p);
+    if (d < Math.min(bd, 1.3 + slop(p)*.5)){ bd = d + .01; best = e; } /* only when you start right on an arrow's end */
   }
   return best ? {x:best.x, y:best.y} : p;
 }
@@ -3116,7 +3144,7 @@ cv.addEventListener('pointerdown', e => {
   if (tool === 'erase'){ drag = {kind:'erase', snapped:false}; eraseAt(p); return; }
   if (tool === 'text'){ openFloat(p, '', {kind:'text', p}, 'Type a label, then Enter'); return; }
   if (tool === 'ruler'){ const sp = snapStart(p); ruler = {a:sp, b:sp, active:true}; draw(); return; }
-  const sp = tool === 'pen' ? p : snapStart(p);
+  const sp = tool === 'pen' || e.altKey ? p : snapStart(p); /* hold Alt to start exactly where you click */
   if (tool === 'run' || tool === 'dribble') draft = {type:'arrow', style:tool, pts:[[sp.x, sp.y]], color};
   if (tool === 'run' && draft){ const rp = runnerAt([sp.x, sp.y], f); draft.runner = rp ? rp.id : null; draft.limit = runLimit(rp, f); }
   else if (tool === 'pen') draft = {type:'pen', pts:[[p.x, p.y]], color, ...penProps()};
@@ -4833,8 +4861,15 @@ async function checkForUpdate(manual){
   const isMac = /Mac/.test(navigator.platform), want = isMac ? ((window.rtFS && window.rtFS.arch) === 'arm64' ? 'AppleSilicon' : 'Intel') : 'Setup.exe';
   const asset = (rel.assets || []).find(a => a.name.includes(want)) || (rel.assets || []).find(a => isMac ? /Mac/.test(a.name) : /\.exe$/i.test(a.name));
   const el = $('#updBar'); el.hidden = false;
-  el.innerHTML = `<b>REMATCH Tactics ${esc(rel.tag_name.replace(/^v/i, ''))} is out</b><span>${esc((rel.name && rel.name !== rel.tag_name ? rel.name + ' · ' : '') + 'you have ' + APP_VERSION)}</span>
-    <a class="btn primary" href="${esc(asset ? asset.browser_download_url : rel.html_url)}" target="_blank" rel="noopener">Download</a><a class="lnk" href="${esc(rel.html_url)}" target="_blank" rel="noopener">What's new</a><button class="lnk" id="updLater">Later</button>`;
+  const oneClick = !isMac && asset && /\.exe$/i.test(asset.name) && window.rtFS && window.rtFS.installUpdate;
+  el.innerHTML = `<b>REMATCH Tactics ${esc(rel.tag_name.replace(/^v/i, ''))} is out</b><span id="updMsg">${esc((rel.name && rel.name !== rel.tag_name ? rel.name + ' · ' : '') + 'you have ' + APP_VERSION)}</span>
+    ${oneClick ? '<button class="btn primary" id="updNow">Update now</button>' : `<a class="btn primary" href="${esc(asset ? asset.browser_download_url : rel.html_url)}" target="_blank" rel="noopener">Download</a>`}<a class="lnk" href="${esc(rel.html_url)}" target="_blank" rel="noopener">What's new</a><button class="lnk" id="updLater">Later</button>`;
+  if (oneClick) $('#updNow').addEventListener('click', async e => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = 'Downloading…';
+    const r = await window.rtFS.installUpdate(asset.browser_download_url, pct => { b.textContent = `Downloading… ${pct}%`; }).catch(err => ({ok:false, reason:String(err)}));
+    if (r && r.ok){ b.textContent = 'Installing…'; $('#updMsg').textContent = 'The app closes, updates and opens again in a few seconds. Your plays are kept.'; }
+    else { b.disabled = false; b.textContent = 'Update now'; toast('The update could not be downloaded. Use What\'s new to get it from GitHub.'); }
+  });
   $('#updLater').addEventListener('click', () => { el.hidden = true; st.skip = rel.tag_name; try { localStorage.setItem(UPD_KEY, JSON.stringify(st)); } catch {} });
 }
 

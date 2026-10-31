@@ -1,6 +1,7 @@
 // Gives the board one narrow door to the plays folder on this computer.
 const {contextBridge, ipcRenderer} = require('electron');
-let onChange = null;
+let onChange = null, onUpd = null;
+ipcRenderer.on('update-progress', (e, pct) => { if (onUpd) onUpd(pct); });
 ipcRenderer.on('plays-changed', () => { if (onChange) onChange(); });
 contextBridge.exposeInMainWorld('rtFS', {
   arch: process.arch,
@@ -13,5 +14,6 @@ contextBridge.exposeInMainWorld('rtFS', {
   rmdir: rel => ipcRenderer.invoke('plays:rmdir', rel),
   reveal: rel => ipcRenderer.invoke('plays:reveal', rel),
   choose: () => ipcRenderer.invoke('plays:choose'),
-  onChange: fn => { onChange = fn; }
+  onChange: fn => { onChange = fn; },
+  installUpdate: (url, progress) => { onUpd = progress || null; return ipcRenderer.invoke('update:install', url); }
 });

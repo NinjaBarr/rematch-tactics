@@ -62,6 +62,9 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINSTKEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTKEY}" "NoRepair" 1
   WriteRegDWORD HKCU "${UNINSTKEY}" "EstimatedSize" 290000
+  ; a one-click update from inside the app runs this silently: open the new version when done
+  IfSilent 0 +2
+  Exec '"$INSTDIR\${APPNAME}.exe"'
 SectionEnd
 
 Section "Uninstall"

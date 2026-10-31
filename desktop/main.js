@@ -100,6 +100,30 @@ ipcMain.handle('plays:choose', async () => {
   if (r.canceled || !r.filePaths[0]) return null; setRoot(r.filePaths[0]); return {root: root};
 });
 
+/* ---------- one-click updates (Windows) ----------
+   The board asks for the new installer from the GitHub release; it is downloaded to the temp folder and run
+   silently (/S), which closes this app, installs over it and opens the new version. */
+ipcMain.handle('update:install', async (e, url) => {
+  if (process.platform !== 'win32') return {ok: false, reason: 'windows only'};
+  if (typeof url !== 'string' || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/[^?#]+\.exe$/i.test(url)) return {ok: false, reason: 'bad url'};
+  const file = path.join(app.getPath('temp'), 'REMATCH-Tactics-Update-' + Date.now() + '.exe');
+  try {
+    const res = await fetch(url, {redirect: 'follow'});
+    if (!res.ok || !res.body) return {ok: false, reason: 'download failed ' + res.status};
+    const total = +res.headers.get('content-length') || 0; let got = 0, last = 0;
+    const out = fs.createWriteStream(file), reader = res.body.getReader();
+    for (;;){ const {done, value} = await reader.read(); if (done) break; got += value.length;
+      if (!out.write(Buffer.from(value))) await new Promise(r => out.once('drain', r));
+      const pct = total ? Math.floor(got/total*100) : 0; if (pct !== last && win){ last = pct; win.webContents.send('update-progress', pct); } }
+    await new Promise((r, j) => out.end(err => err ? j(err) : r()));
+    if (total && got < total) return {ok: false, reason: 'download incomplete'};
+    const {spawn} = require('child_process');
+    spawn(file, ['/S'], {detached: true, stdio: 'ignore'}).unref();
+    setTimeout(() => app.quit(), 400);
+    return {ok: true};
+  } catch (err){ try { fs.unlinkSync(file); } catch {} return {ok: false, reason: String(err && err.message || err)}; }
+});
+
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
