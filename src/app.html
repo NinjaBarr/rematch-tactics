@@ -1108,12 +1108,23 @@ function goalAt(pt){
    by the same player. A pass is timed to meet whoever is running onto it, and the ball then stays with that
    player through any dribble that follows (or goes on in another pass). Times are in "beats": 1 beat = one
    normal step of playback. */
-const EE_SPEED = 1.2; /* an Extra Effort run is a bit quicker */
-const SPD = {run:16, dribble:12.5, pass:40, air:26, dive:20};
+/* Real game speeds (measured by Joseph), in pitch units per second. Playback runs in real time from these:
+   sprint 10 units in 1.15 s; Extra Effort 10 units in 1 s and lasts 1.5 s; a full-power shot covers 33.4 units in 1 s;
+   a full-power tap pass covers 33.4 units in 1.15 s. Dribble, lob and dive speeds are estimates. */
+const SPEED = {sprint:10/1.15, ee:10, eeSecs:1.5, shot:33.4, pass:33.4/1.15};
+const SPD = {run:SPEED.sprint, dribble:SPEED.sprint*.78, pass:SPEED.pass, shot:SPEED.shot, air:SPEED.pass, dive:9};
+/* time to run a leg; an Extra Effort leg goes at EE speed for its first 1.5 s, then back to sprint speed */
+function legTime(len, speed, ee){
+  if (!ee) return len/speed;
+  const eeLen = SPEED.ee*SPEED.eeSecs*(speed/SPEED.sprint);
+  return len <= eeLen ? len/(SPEED.ee*speed/SPEED.sprint) : SPEED.eeSecs + (len - eeLen)/speed;
+}
 const FOOT = PR + BR - .2;
 const passStart = s => P(s.type === 'bank' ? s.a : s.pts[0]);
 function passPts(s){ if (s.type !== 'bank') return s.pts; const bb = bankOf(s); return bb.ok ? bb.pts : [s.a, s.t]; }
 /* nearest point on a path to q: distance, how far along (s), which segment (i) */
+/* where along a wall pass (0..1 of its length) it hits each wall, for the bounce sound */
+function bounceFracs(s, pts){ const bb = bankOf(s); if (!bb.ok || !bb.bounces) return null; const L = pathLen(pts) || 1; return bb.bounces.map(q => nearestOnPath(pts, P(q)).s/L); }
 function nearestOnPath(pts, q){
   let best = {d:Infinity, s:0, i:0, p:P(pts[0])}, acc = 0;
   for (let i = 0; i < pts.length - 1; i++){ const a = P(pts[i]), b = P(pts[i+1]), L = dist(a, b), r = segDist(q, a, b);
@@ -1190,14 +1201,18 @@ function planCombo(f, pl, carrier, nearest){
     if (!rid) break; holder = rid; from = rk;
   }
   const isCombo = dives.length > 0 || arrows.some(a => a.ee) || Object.values(chains).some(c => c.length > 1) || plan.length > 1 || plan.some(q => q.passer && q.j >= 0);
-  if (!isCombo) return null;
+  if (!isCombo && !arrows.length && !plan.length) return null;
 
   /* schedule */
   const L = {};
   for (const id in chains){
     let prev = f.pos[id];
     L[id] = chains[id].map((s, i) => { const pts = [[prev.x, prev.y], ...s.pts.slice(1)]; prev = P(s.pts[s.pts.length - 1]);
-      return {pts, d:Math.max(s.style === 'dive' ? .2 : .08, pathLen(pts)/((s.style === 'dribble' ? SPD.dribble : s.style === 'dive' ? SPD.dive : SPD.run)*(s.ee ? EE_SPEED : 1))), t0:0, t1:0, style:s.style, ee:!!s.ee}; });
+      const len = pathLen(pts), sp = s.style === 'dribble' ? SPD.dribble : s.style === 'dive' ? SPD.dive : SPD.run;
+      const ee = !!s.ee || (i === 0 && s.style !== 'dive' && hasEE(f, id)); /* step-wide EE starts with their first move */
+      const d = Math.max(s.style === 'dive' ? .3 : .05, legTime(len, sp, ee));
+      const eeLen = SPEED.ee*SPEED.eeSecs*(sp/SPEED.sprint), split = ee && len > eeLen ? {ft:SPEED.eeSecs/d, fd:eeLen/len} : null;
+      return {pts, d, t0:0, t1:0, style:s.style, ee, split}; });
   }
   const ci = {}, ct = {};
   const runTo = (id, k) => { let t = ct[id] || 0; const legs = L[id] || []; for (let i = ci[id] || 0; i <= k && i < legs.length; i++){ legs[i].t0 = t; t += legs[i].d; legs[i].t1 = t; ci[id] = i + 1; } ct[id] = t; return t; };
@@ -1205,7 +1220,7 @@ function planCombo(f, pl, carrier, nearest){
   for (const q of plan){
     const prevQ = plan[plan.indexOf(q) - 1], settle = prevQ && prevQ.air && prevQ.recv === q.passer && prevQ.k === q.j && (prevQ.s.recv || 'control') !== 'volley' ? .18 : 0;
     const sMin = (q.passer ? runTo(q.passer, q.j) : 0) + settle;
-    const pd = Math.max(.15, pathLen(q.pts)/(q.air ? SPD.air : SPD.pass));
+    const pd = Math.max(.08, pathLen(q.pts)/(q.air ? SPD.air : (!q.dive && goalAt(q.pts[q.pts.length - 1])) || q.shot ? SPD.shot : SPD.pass));
     let m = sMin + pd;
     if (q.dive){ /* the keeper times the jump to meet the ball; the shot is never held back for them */
       const g = L[q.recv][0]; g.t1 = m; g.t0 = Math.max(ct[q.recv] || 0, m - g.d); ci[q.recv] = 1; ct[q.recv] = m;
@@ -1232,12 +1247,12 @@ function planCombo(f, pl, carrier, nearest){
   if (hold) segs.push({k:'with', id:hold, t0:tHold, t1:T});
   const tracks = {};
   for (const id in L){
-    const legs = L[id].map(g => ({pts:g.pts.map(r2), t0:g.t0/T, t1:g.t1/T, style:g.style, ...(g.ee ? {ee:1} : {})}));
+    const legs = L[id].map(g => ({pts:g.pts.map(r2), t0:g.t0/T, t1:g.t1/T, style:g.style, lin:1, ...(g.ee ? {ee:1, eeEnd:Math.min(g.t1, g.t0 + SPEED.eeSecs/T)} : {}), ...(g.split ? {split:g.split} : {})}));
     legs.forEach((g, i) => { g.ei = i === 0 || legs[i-1].t1 < g.t0 - 1e-4 ? 1 : 0; g.eo = i === legs.length - 1 || legs[i+1].t0 > g.t1 + 1e-4 ? 1 : 0; });
     tracks[id] = legs;
   }
   /* the ball: at someone's feet, or in the air between them */
-  const tl = {dur:clamp(T, 1, 4), tracks, ball:[]};
+  const tl = {secs:Math.max(.25, T), dur:Math.max(.25, T)/1.3, tracks, ball:[]};
   const at = (id, t) => legAt(tracks[id], t, f.pos[id]);
   let lastBall = f.pos.ball;
   for (let i = 0; i < segs.length; i++){
@@ -1257,7 +1272,7 @@ function planCombo(f, pl, carrier, nearest){
       else if (q.recv){ const rp = at(q.recv, t1), d = endDir(q.pts), sg2 = q.self ? 1 : -1; E = {x:rp.x + sg2*d.x*FOOT, y:rp.y + sg2*d.y*FOOT}; }
       const into = !q.dive && goalAt(q.pts[q.pts.length - 1]); if (into) E = {x:into.x, y:into.y};
       const pts = q.air ? airArc([S.x, S.y], [E.x, E.y]) : [[S.x, S.y], ...q.pts.slice(1, -1), [E.x, E.y]];
-      tl.ball.push({k:'fly', t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
+      tl.ball.push({k:'fly', lin:1, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
       lastBall = E;
     }
   }
@@ -1271,7 +1286,9 @@ function legAt(legs, t, start){
   for (let i = 0; i < legs.length; i++){
     const g = legs[i];
     if (t < g.t0) return P(legs[i-1].pts[legs[i-1].pts.length - 1]);
-    if (t <= g.t1){ const u = clamp((t - g.t0)/((g.t1 - g.t0) || 1), 0, 1); return pointAlong(g.pts, g.ei && g.eo ? ease(u) : g.ei ? easeIn2(u) : g.eo ? easeOut2(u) : u); }
+    if (t <= g.t1){ const u = clamp((t - g.t0)/((g.t1 - g.t0) || 1), 0, 1);
+      if (g.lin){ const sp = g.split; return pointAlong(g.pts, sp ? (u < sp.ft ? u/sp.ft*sp.fd : sp.fd + (u - sp.ft)/((1 - sp.ft) || 1)*(1 - sp.fd)) : u); }
+      return pointAlong(g.pts, g.ei && g.eo ? ease(u) : g.ei ? easeIn2(u) : g.eo ? easeOut2(u) : u); }
   }
   const l = legs[legs.length - 1]; return P(l.pts[l.pts.length - 1]);
 }
@@ -1287,7 +1304,7 @@ function legHeading(legs, t){
 }
 const lerpAng = (x, y, k) => { let d = y - x; while (d > Math.PI) d -= 2*Math.PI; while (d < -Math.PI) d += 2*Math.PI; return x + d*k; };
 function ballAt(tl, f0, b, t){
-  if (b.k === 'fly'){ const u = clamp((t - b.t0)/((b.t1 - b.t0) || 1), 0, 1); return pointAlong(b.pts, b.save ? u : easeOut(u)); } /* shots at the keeper keep their pace */
+  if (b.k === 'fly'){ const u = clamp((t - b.t0)/((b.t1 - b.t0) || 1), 0, 1); return pointAlong(b.pts, b.save || b.lin ? u : easeOut(u)); } /* real-time steps: the ball keeps its pace */
   const tr = tl.tracks[b.id], p = legAt(tr, t, f0.pos[b.id]);
   if (b.hand) return {x:p.x + b.hand[0], y:p.y + b.hand[1]};
   let a = legHeading(tr, t); if (a == null) a = b.dep != null ? b.dep : b.arr;
@@ -2599,7 +2616,15 @@ let animMoves = true, hideTut = false;
 let motionNow = null; /* {id: {A, ph, dir, drib, ballSide, kick:{k, dir, pow, air}}, pops:[...] } while a frame is drawn */
 const KICK_W = 260, KICK_F = 240; /* ms of wind-up before contact, follow-through after */
 const STRIDE = 2.3; /* pitch units per step */
-const moveMs = f => 1300/speed*(f && f.tl ? f.tl.dur || 1 : 1);
+/* how long a step's movement takes on screen: real seconds for real-time steps; dragged-only steps move at sprint pace */
+function stepSecs(idx){
+  const fb = doc.frames[idx], fa = doc.frames[idx - 1]; if (!fb) return 1.3;
+  if (fb.tl) return fb.tl.secs || (fb.tl.dur || 1)*1.3;
+  if (!fa) return 1.3; let m = 0; for (const id in fb.pos) if (fa.pos[id] && id !== 'ball') m = Math.max(m, dist(fa.pos[id], fb.pos[id]));
+  if (fb.ballPass && fa.pos.ball && fb.pos.ball) m = Math.max(m, dist(fa.pos.ball, fb.pos.ball)*SPEED.sprint/SPEED.pass);
+  return clamp(m/SPEED.sprint, .4, 8);
+}
+const moveMs = f => 1000*stepSecs(doc.frames.indexOf(f))/speed;
 /* when, in this step, each pass or shot is struck, and by whom */
 function stepKicks(fa, fb){
   const out = [];
@@ -2645,7 +2670,7 @@ function buildMotion(pos, now, live){
     const drib = A > .05 && !ballFly && pos.ball && Math.hypot(bx, by) < 2.1;
     const m = {A, ph:(mo.dist[id] || 0)/STRIDE*Math.PI, dir, drib, ballSide:dir == null ? 1 : Math.sign(Math.cos(dir)*by - Math.sin(dir)*bx) || 1};
     if (live && live.ee && hasEE(live.ee, id)) m.ee = {t:live.t || 0};
-    else if (live && live.tl && live.tl.tracks[id]) for (const g of live.tl.tracks[id]) if (g.ee && live.t >= g.t0 && live.t <= g.t1 + .02){ m.ee = {t:(live.t - g.t0)/((g.t1 - g.t0) || 1)*.6}; break; }
+    if (live && live.tl && live.tl.tracks[id]){ m.ee = null; for (const g of live.tl.tracks[id]) if (g.ee && live.t >= g.t0 && live.t <= (g.eeEnd || g.t1) + .01){ m.ee = {t:clamp((live.t - g.t0)/(((g.eeEnd || g.t1) - g.t0) || 1), 0, 1)*.6}; break; } }
     if (live && live.tl && live.tl.tracks[id]) for (const g of live.tl.tracks[id]) if (g.style === 'dive' && live.t >= g.t0){
       const a = P(g.pts[0]), z = P(g.pts[g.pts.length - 1]);
       m.dive = {u:clamp((live.t - g.t0)/((g.t1 - g.t0) || 1), 0, 1), dir:Math.atan2(z.y - a.y, z.x - a.x)}; m.A = 0; }
@@ -2768,7 +2793,7 @@ function carryBall(fa, fb, t, out){
   const m = mix(o1, mix(o0, oh, k0), k1), r = Math.max(m.r, PR + BR - .25);
   out.ball = {x:q.x + Math.cos(m.a)*r, y:q.y + Math.sin(m.a)*r};
 }
-const segDur = () => 1300 / speed*((anim.playing && anim.phase === 'move' && doc.frames[anim.to] && doc.frames[anim.to].tl) ? doc.frames[anim.to].tl.dur || 1 : 1), holdDur = () => 750 / speed;
+const segDur = () => 1000*stepSecs(anim.playing && anim.phase === 'move' ? anim.to : cur)/speed, holdDur = () => 750 / speed;
 /* small synthesized sounds, no files needed */
 let soundOn = true, actx = null;
 function audio(){ try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch { actx = null; } return actx; }
@@ -2793,7 +2818,16 @@ function sfx(kind){
   else if (kind === 'wall'){ thump(ac, t, 320, 140, .08, .3); noise(ac, t, .04, .25, 2600, 2); }
   else if (kind === 'net'){ noise(ac, t, .45, .22, 700, .5); }
 }
+/* steps made before real-time playback: rebuild their timing from their arrows if the board still matches them */
+function refreshTimelines(){
+  for (let k = 1; k < doc.frames.length; k++){
+    const fb = doc.frames[k]; if (fb.tl && fb.tl.secs) continue;
+    let nf; try { nf = buildNextFrame(doc, k - 1); } catch { continue; } if (!nf || !nf.tl) continue;
+    if (Object.keys(nf.pos).every(id => !fb.pos[id] || dist(nf.pos[id], fb.pos[id]) < .6)) fb.tl = nf.tl;
+  }
+}
 function startPlay(){
+  refreshTimelines();
   if (soundOn) audio();
   if (doc.frames.length < 2){ toast('Add a second step with Next step to animate the play.'); return; }
   sel = null; syncSel();
@@ -2860,7 +2894,8 @@ function drawTweenTL(fa, fb, t){
   const bb = tlBall(tl, fa, t), b = bb && bb.b;
   let ballLocked = false, ballLift = 0, ballZ = 0;
   if (b && b.k === 'fly' && t <= b.t1){
-    const e = easeOut(clamp((t - b.t0)/((b.t1 - b.t0) || 1), 0, 1)), L = pathLen(b.pts);
+    const u0 = clamp((t - b.t0)/((b.t1 - b.t0) || 1), 0, 1), e = b.lin || b.save ? u0 : easeOut(u0), L = pathLen(b.pts);
+    if (b.bounces){ const k = anim.bkey === b ? anim.bn | 0 : 0; if (anim.bkey !== b){ anim.bkey = b; anim.bn = 0; } if (k < b.bounces.length && e >= b.bounces[k]){ anim.bn = k + 1; sfx('wall'); } }
     if (b.shot && e >= .97 && !anim.netted){ anim.netted = true; sfx('net'); }
     ballLocked = e*L < passCfg.noTouch;
     if (b.air){ ballLift = 4*e*(1 - e);
@@ -3310,7 +3345,7 @@ function drawRuler(c){
   c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.setLineDash([.6, .4]); c.lineWidth = .22; c.strokeStyle = '#ffffff'; c.stroke(); c.setLineDash([]);
   const nx = -(b.y - a.y)/d, ny = (b.x - a.x)/d;
   for (const q of [a, b]){ c.beginPath(); c.moveTo(q.x - nx*.8, q.y - ny*.8); c.lineTo(q.x + nx*.8, q.y + ny*.8); c.lineWidth = .24; c.stroke(); }
-  fieldText(c, `${d.toFixed(1)} units · ≈${(d*M_PER_UNIT).toFixed(1)} m`, (a.x + b.x)/2 + nx*1.6, (a.y + b.y)/2 + ny*1.6, 1.3, '#ffffff');
+  fieldText(c, `${d.toFixed(1)} units · ≈${(d*M_PER_UNIT).toFixed(1)} m · run ${(d/SPEED.sprint).toFixed(2)}s · EE ${legTime(d, SPEED.sprint, true).toFixed(2)}s · pass ${(d/SPEED.pass).toFixed(2)}s · shot ${(d/SPEED.shot).toFixed(2)}s`, (a.x + b.x)/2 + nx*1.6, (a.y + b.y)/2 + ny*1.6, 1.3, '#ffffff');
   c.restore();
 }
 cv.addEventListener('dblclick', e => {

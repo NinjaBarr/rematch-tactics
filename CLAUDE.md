@@ -21,3 +21,7 @@ The session cannot upload release assets directly (binary uploads are blocked); 
 ## Conventions
 - Asset name stays `REMATCH-Tactics-Setup.exe` (README links use releases/latest/download/...).
 - Also publish the built page to the claude.ai artifact when asked.
+
+## Real-time speeds (from Joseph, Oct 31) — `SPEED` in app.html
+Sprint 10 units / 1.15 s · Extra Effort 10 units / 1 s, lasts 1.5 s · full-power shot 33.4 units / 1 s · full-power tap pass 33.4 units / 1.15 s.
+Estimates: dribble = 0.78 × sprint, lob = tap pass speed, keeper dive 9 units/s. Playback is real time (constant speed); the ruler shows run/EE/pass/shot times.
