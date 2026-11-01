@@ -767,6 +767,7 @@ const HINTS = {
   select:'<b>Move</b> · drag players and the ball. A player on the ball carries it. Click a drawing to select it. Double-click a player to relabel.',
   run:'<b>Run</b> · draw an off-ball run starting on a player. Curves follow your stroke.',
   pass:'<b>Pass</b> · drag from the ball carrier to the target. Shift while drawing makes it aerial.',
+  shot:'<b>Shot</b> · drag from the ball carrier toward goal. Shift while drawing makes it aerial.',
   air:'<b>Aerial pass</b> · drag from the ball carrier to the target. Anyone near the passer blocks the lift. Right-click it to choose Control or Volley for the receiver.',
   dribble:'<b>Dribble</b> · draw the carry path starting on the ball carrier.',
   bank:'<b>Wall pass</b> · drag from the passer into a wall until it snaps, then keep dragging to pull the rebound out at the true angle. Reach the next wall and it carries on off the corner. Shift lofts it.',
@@ -1703,63 +1704,144 @@ cv.addEventListener('pointermove', e => {
   if (!(anim.phase === 'move')) draw();
 }, true);
 for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, e => { if (otsLook && e.pointerId === otsLook.id){ otsLook = null; cv.style.cursor = ''; e.stopImmediatePropagation(); } }, true);
-/* Controller support (standard layout: Xbox / PlayStation / most USB pads)
-   A / Cross or Start: play / pause    B / Circle: stop    D-pad left / right: step back / forward
-   LB / RB: follow previous / next (ball, then the 10 players)    LT / RT: slower / faster
-   Y / Triangle: over-the-shoulder on/off    X / Square: focus on/off    R3: re-centre the look
-   Right stick: look around in over-the-shoulder, otherwise up/down zooms    Left stick: pan the board */
-const pad = {raf:0, prev:[], idx:null, last:0};
-const PAD_DEAD = .18, padAxis = v => Math.abs(v) < PAD_DEAD ? 0 : (v - Math.sign(v)*PAD_DEAD)/(1 - PAD_DEAD);
+/* ---------- Controller: the whole app with a gamepad (Xbox / PlayStation / most USB pads, standard layout) ----------
+   A magnetic crosshair stands in for the mouse: it slows over anything clickable and settles onto it when you let go of the stick.
+   Left stick: cursor   A: click (hold to drag / draw)   B: back / cancel   X: right-click menu   Y: undo
+   LB / RB: previous / next tool   LT: aerial (Shift)   RT: Extra Effort (Q)   D-pad left / right: steps   D-pad up / down: zoom
+   Right stick: pan the board, scroll a panel, or look around in over-the-shoulder   Menu / Options: play / pause
+   View / Share: controller map   L3: cycle who the camera follows   R3: fit the board / re-centre the look */
+const PAD_MAP = [['Left stick', 'Move the cursor (it locks onto buttons and players)'], ['A / Cross', 'Click · hold to drag or draw'], ['B / Circle', 'Back / cancel'], ['X / Square', 'Right-click menu (Extra Effort, keeper jump…)'], ['Y / Triangle', 'Undo'],
+  ['LB / RB', 'Previous / next tool'], ['LT (hold)', 'Aerial / lofted (Shift)'], ['RT', 'Extra Effort on the run you are drawing (Q)'], ['D-pad ← →', 'Previous / next step'], ['D-pad ↑ ↓', 'Zoom in / out'],
+  ['Right stick', 'Pan the board · scroll a panel · look around in over-the-shoulder'], ['Menu / Options', 'Play / pause'], ['L3', 'Cycle who the camera follows'], ['R3', 'Fit the board · re-centre the look'], ['View / Share', 'Show / hide this map']];
+const pad = {raf:0, prev:[], idx:null, last:0, on:false, x:innerWidth/2, y:innerHeight/2, held:false, downEl:null, downAt:null, lock:null, tgts:[], tgtT:0, shift:false, slider:null, moved:false};
+const PAD_DEAD = .16, padAxis = v => Math.abs(v) < PAD_DEAD ? 0 : (v - Math.sign(v)*PAD_DEAD)/(1 - PAD_DEAD);
+(() => { const st = document.createElement('style'); st.textContent = `
+#padCursor{position:fixed;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;pointer-events:none;z-index:2147483646;display:none;transition:transform .09s}
+#padCursor.lock{transform:scale(.72)} #padCursor svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+#padLock{position:fixed;pointer-events:none;z-index:2147483645;display:none;border:2px solid var(--accent);border-radius:9px;box-shadow:0 0 0 4px rgba(242,179,61,.22);transition:left .08s,top .08s,width .08s,height .08s}
+#padHelp{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2147483644;background:rgba(10,14,20,.95);border:1px solid var(--line);border-radius:14px;padding:18px 22px;color:var(--ink,#fff);max-width:min(560px,92vw);display:none;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#padHelp h3{margin:0 0 10px;font:700 15px var(--f-display);letter-spacing:.08em;text-transform:uppercase} #padHelp table{border-collapse:collapse;font-size:13px} #padHelp td{padding:4px 10px 4px 0;vertical-align:top} #padHelp td:first-child{font-weight:700;white-space:nowrap;color:var(--accent)} #padHelp p{margin:10px 0 0;font-size:12px;color:var(--muted)}`;
+  document.head.appendChild(st);
+  const c = document.createElement('div'); c.id = 'padCursor'; c.innerHTML = '<svg viewBox="-17 -17 34 34"><circle r="10" fill="rgba(242,179,61,.18)" stroke="#f2b33d" stroke-width="2.2"/><path d="M0-16v6M0 10v6M-16 0h6M10 0h6" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><circle r="2" fill="#fff"/></svg>';
+  const l = document.createElement('div'); l.id = 'padLock';
+  const h = document.createElement('div'); h.id = 'padHelp'; h.innerHTML = '<h3>Controller</h3><table>' + PAD_MAP.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table><p>Press View / Share to close. Moving the mouse hides the controller cursor.</p>';
+  document.body.append(c, l, h); })();
+const PAD_SEL = 'button,a[href],input:not([type=hidden]),select,textarea,label.eye,label.btn,[role=button],[role=menuitem],[role=tab],[data-tool],[data-step],summary,[tabindex="0"]';
+function padShow(on){ if (pad.on === on) return; pad.on = on; $('#padCursor').style.display = on ? 'block' : 'none'; if (!on){ $('#padLock').style.display = 'none'; pad.lock = null; } }
+function padTargets(now){
+  if (now - pad.tgtT < 140) return pad.tgts; pad.tgtT = now;
+  const out = [], vw = innerWidth, vh = innerHeight;
+  for (const el of document.querySelectorAll(PAD_SEL)){
+    if (el.disabled || el.closest('[hidden],[inert]')) continue;
+    const r = el.getBoundingClientRect(); if (r.width < 4 || r.height < 4 || r.width > 420 || r.height > 260 || r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) continue;
+    const cx = clamp((r.left + r.right)/2, 0, vw - 1), cy = clamp((r.top + r.bottom)/2, 0, vh - 1), hit = document.elementFromPoint(cx, cy);
+    if (!hit || !(hit === el || el.contains(hit) || hit.contains(el) || (hit.closest && hit.closest('label') === el.closest('label') && el.closest('label')))) continue;
+    out.push({el, x:cx, y:cy, r});
+  }
+  /* players and the ball on the board, where a click on them lands */
+  if (doc && !anim.playing){ const cr = cv.getBoundingClientRect(), pos = frame().pos;
+    for (const pc of doc.pieces){ if (pc.team !== 'ball' && !doc.show[pc.team]) continue; const q = pos[pc.id]; if (!q) continue;
+      const sp = hApply(Hf, q.x, q.y); if (!(sp.w > 0)) continue; const x = cr.left + sp.x, y = cr.top + sp.y; if (x < cr.left || y < cr.top || x > cr.right || y > cr.bottom) continue;
+      const rad = clamp(Math.sqrt(Math.abs(hJac(Hf, q.x, q.y).a*hJac(Hf, q.x, q.y).d))*(pc.team === 'ball' ? BR : PR), 9, 40);
+      out.push({piece:pc.id, x, y, r:{left:x - rad, top:y - rad, right:x + rad, bottom:y + rad, width:2*rad, height:2*rad}}); } }
+  return pad.tgts = out;
+}
+const padDist = (t, x, y) => Math.hypot(Math.max(t.r.left - x, 0, x - t.r.right), Math.max(t.r.top - y, 0, y - t.r.bottom));
+function padFire(el, type, extra){
+  if (!el) return; const o = {bubbles:true, cancelable:true, composed:true, view:window, clientX:pad.x, clientY:pad.y, screenX:pad.x, screenY:pad.y, button:0, buttons:pad.held ? 1 : 0, shiftKey:pad.shift, pointerId:1, pointerType:'mouse', isPrimary:true, ...extra};
+  el.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, o) : new MouseEvent(type, o));
+}
+function padKey(key, extra, up){ const t = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
+  t.dispatchEvent(new KeyboardEvent(up ? 'keyup' : 'keydown', {key, code:key.length === 1 ? 'Key' + key.toUpperCase() : key, bubbles:true, cancelable:true, shiftKey:pad.shift, ...extra})); }
+const padEl = () => document.elementFromPoint(clamp(pad.x, 0, innerWidth - 1), clamp(pad.y, 0, innerHeight - 1));
+function padScrollable(el){ for (let e = el; e && e !== document.body; e = e.parentElement){ const cs = getComputedStyle(e); if (/(auto|scroll)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 2) return e; } return null; }
 function padFollowList(){ return ['ball', ...['home', 'away'].flatMap(t => doc.pieces.filter(p => p.team === t).slice(0, 5)).map(p => p.id)]; }
-function padCycleFollow(dir){
-  const L = padFollowList(), at = followBall ? L.indexOf(followId) : -1, n = at < 0 ? (dir > 0 ? 0 : L.length - 1) : (at + dir + L.length) % L.length;
-  setFollow(true, L[n]);
-}
-function padSpeed(dir){
-  const sel = $('#speed'), vals = [...sel.options].map(o => +o.value), i = vals.indexOf(speed), n = clamp((i < 0 ? vals.indexOf(1) : i) + dir, 0, vals.length - 1);
-  speed = vals[n]; sel.value = String(speed); saveSettings(); toast(`Playback ${speed}×`);
-}
-function padButton(b){
+function padCycleFollow(){ const L = padFollowList(), at = followBall ? L.indexOf(followId) : -1; if (at === L.length - 1) setFollow(false); else setFollow(true, L[at + 1]); }
+function padTool(dir){ const ids = TOOLS.map(t => t.id).filter(id => document.querySelector(`[data-tool="${id}"]`)); const i = ids.indexOf(tool); setTool(ids[(i + dir + ids.length) % ids.length]); toast(`Tool: ${(TOOLS.find(t => t.id === tool) || {}).name || tool}`); }
+function padPress(b){
   if (!doc) return;
-  if (b === 0 || b === 9) anim.playing ? stopPlay() : startPlay();
-  else if (b === 1) stopPlay();
-  else if (b === 14) goStep(cur - 1);
-  else if (b === 15) goStep(cur + 1);
-  else if (b === 12) goStep(0);
-  else if (b === 13) goStep(doc.frames.length - 1);
-  else if (b === 4) padCycleFollow(-1);
-  else if (b === 5) padCycleFollow(1);
-  else if (b === 6) padSpeed(-1);
-  else if (b === 7) padSpeed(1);
-  else if (b === 3) $('#otsBtn').click();
-  else if (b === 2) $('#focusBtn').click();
-  else if (b === 11 && ots){ ots.manual = false; ots.pitch = 0; if (anim.phase !== 'move') draw(); }
+  const help = $('#padHelp');
+  if (b === 8){ help.style.display = help.style.display === 'block' ? 'none' : 'block'; return; }
+  if (help.style.display === 'block' && (b === 1 || b === 0)){ help.style.display = 'none'; return; }
+  if (b === 0){ padShow(true); const el = padEl(); pad.downEl = el; pad.downAt = {x:pad.x, y:pad.y}; pad.moved = false; pad.held = true;
+    if (el && el.tagName === 'SELECT'){ pad.downEl = null; const n = el.options.length; if (n){ el.selectedIndex = (el.selectedIndex + 1) % n; el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); } return; }
+    if (el && el.tagName === 'INPUT' && el.type === 'range'){ pad.slider = el; padSlide(); return; }
+    padFire(el, 'pointerdown'); padFire(el, 'mousedown');
+    if (el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !/checkbox|radio|range|button|submit|color/.test(el.type)) || el.isContentEditable)) el.focus();
+    return; }
+  if (b === 1){ const a = document.activeElement; if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)){ a.blur(); return; } padKey('Escape'); return; }
+  if (b === 2){ padShow(true); const el = padEl(); padFire(el, 'contextmenu', {button:2, buttons:0}); return; }
+  if (b === 3){ padKey('z', {ctrlKey:true}); return; }
+  if (b === 4) return padTool(-1);
+  if (b === 5) return padTool(1);
+  if (b === 6){ pad.shift = true; padKey('Shift', {shiftKey:true}); return; }
+  if (b === 7){ padKey('q'); return; }
+  if (b === 9) return anim.playing ? stopPlay() : startPlay();
+  if (b === 14) return goStep(cur - 1);
+  if (b === 15) return goStep(cur + 1);
+  if (b === 12) return zoomStep(1);
+  if (b === 13) return zoomStep(-1);
+  if (b === 10) return padCycleFollow();
+  if (b === 11){ if (otsActive() && ots){ ots.manual = false; ots.pitch = 0; if (anim.phase !== 'move') draw(); } else zoomFit(); return; }
 }
+function padRelease(b){
+  if (b === 6){ pad.shift = false; padKey('Shift', {shiftKey:false}, true); return; }
+  if (b !== 0 || !pad.held) return;
+  pad.held = false;
+  if (pad.slider){ pad.slider.dispatchEvent(new Event('change', {bubbles:true})); pad.slider = null; return; }
+  const d = pad.downEl; if (!d) return;
+  const tgt = d === cv ? cv : padEl() || d;
+  padFire(tgt, 'pointerup'); padFire(tgt, 'mouseup');
+  const el = padEl();
+  if (el && (d === el || d.contains(el) || el.contains(d)) && !(d === cv && pad.moved)) padFire(el, 'click', {buttons:0});
+  pad.downEl = null;
+}
+function padSlide(){ const s = pad.slider, r = s.getBoundingClientRect(), mn = +s.min || 0, mx = s.max === '' ? 100 : +s.max, st = +s.step || 1;
+  const v = clamp(Math.round((mn + (mx - mn)*clamp((pad.x - r.left)/r.width, 0, 1))/st)*st, mn, mx); if (+s.value !== v){ s.value = v; s.dispatchEvent(new Event('input', {bubbles:true})); } }
 function padTick(now){
   pad.raf = 0;
   const gp = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [], g = gp.find(x => x.index === pad.idx) || gp[0];
-  if (!g){ pad.prev = []; return; }
+  if (!g){ pad.prev = []; padShow(false); return; }
   pad.idx = g.index;
   const dt = Math.min(.05, pad.last ? (now - pad.last)/1000 : 0); pad.last = now;
-  const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox';
-  g.buttons.forEach((bt, i) => { const on = bt.pressed || bt.value > .5; if (on && !pad.prev[i] && !typing) padButton(i); pad.prev[i] = on; });
+  g.buttons.forEach((bt, i) => { const on = bt.pressed || bt.value > .5; if (on && !pad.prev[i]) padPress(i); else if (!on && pad.prev[i]) padRelease(i); pad.prev[i] = on; });
   const lx = padAxis(g.axes[0] || 0), ly = padAxis(g.axes[1] || 0), rx = padAxis(g.axes[2] || 0), ry = padAxis(g.axes[3] || 0);
-  if (doc && !typing && dt){
-    if (otsActive() && ots && (rx || ry)){
-      ots.manual = true;
-      ots.h += rx*Math.abs(rx)*2.6*dt;                                         /* ~150°/s at full tilt, gentle near the middle */
-      ots.pitch = clamp((ots.pitch || 0) - ry*Math.abs(ry)*60*dt, OTS.aim - OTS.aimDown, OTS.aim - OTS.aimUp); /* stick up looks up */
-      if (anim.phase !== 'move') draw();
-    } else if (!otsActive()){
-      if (ry) zoomAt(cam.z*Math.exp(-ry*1.6*dt));
-      if ((lx || ly) && !(anim.playing && followBall)){ const c = hApply(Hfit, cam.cx, cam.cy), sp = 520*dt; panTo(c, -lx*sp*cam.z, -ly*sp*cam.z); }
+  if (doc && dt){
+    /* cursor: a curved response for precision, slowed over targets, settling onto the nearest one when the stick is let go */
+    const mag = Math.min(1, Math.hypot(lx, ly)), tg = pad.on ? padTargets(now) : [];
+    let lock = null, ld = 1e9;
+    for (const t of tg){ if (pad.held && pad.downEl === cv && !t.piece) continue; const d = padDist(t, pad.x, pad.y), sc = d + .35*Math.hypot(t.x - pad.x, t.y - pad.y); if (d <= (t.piece ? 26 : 22) && sc < ld){ ld = sc; lock = t; } } /* overlapping targets: the nearer centre wins */
+    if (mag > 0){ if (!pad.on){ padShow(true); }
+      pad.full = mag > .92 ? (pad.full || 0) + dt : 0; /* hold the stick all the way over and it speeds up for long trips */
+      const sp = Math.min(innerWidth, innerHeight)*1.15*Math.pow(mag, 1.7)*(1 + Math.min(1, Math.max(0, pad.full - .35)*1.6))*(lock ? .42 : 1);
+      pad.x = clamp(pad.x + lx/mag*sp*mag*dt, 0, innerWidth - 1); pad.y = clamp(pad.y + ly/mag*sp*mag*dt, 0, innerHeight - 1); }
+    else if (lock && !pad.slider){ const e = 1 - Math.exp(-dt*16); pad.x += (lock.x - pad.x)*e; pad.y += (lock.y - pad.y)*e; }
+    if (pad.on){
+      const cEl = $('#padCursor'); cEl.style.left = pad.x + 'px'; cEl.style.top = pad.y + 'px'; cEl.classList.toggle('lock', !!lock);
+      const lk = $('#padLock');
+      if (lock && !lock.piece){ lk.style.display = 'block'; lk.style.left = (lock.r.left - 3) + 'px'; lk.style.top = (lock.r.top - 3) + 'px'; lk.style.width = (lock.r.width + 6) + 'px'; lk.style.height = (lock.r.height + 6) + 'px'; lk.style.borderRadius = lock.piece ? '50%' : '9px'; }
+      else lk.style.display = 'none';
+      pad.lock = lock;
+      const moved = !pad.lastPos || Math.abs(pad.lastPos.x - pad.x) + Math.abs(pad.lastPos.y - pad.y) > .3; pad.lastPos = {x:pad.x, y:pad.y};
+      if (moved){
+        if (pad.slider) padSlide();
+        else { const tgt = pad.held && pad.downEl === cv ? cv : padEl(); padFire(tgt, 'pointermove'); padFire(tgt, 'mousemove');
+          if (pad.held && pad.downAt && Math.hypot(pad.x - pad.downAt.x, pad.y - pad.downAt.y) > 6) pad.moved = true; } }
     }
+    /* right stick */
+    if (rx || ry){
+      if (otsActive() && ots){ ots.manual = true; ots.h += rx*Math.abs(rx)*2.6*dt;
+        ots.pitch = clamp((ots.pitch || 0) - ry*Math.abs(ry)*60*dt, OTS.aim - OTS.aimDown, OTS.aim - OTS.aimUp); if (anim.phase !== 'move') draw(); }
+      else { const sc = pad.on && padScrollable(padEl());
+        if (sc){ sc.scrollTop += ry*900*dt; sc.scrollLeft += rx*900*dt; }
+        else if (!(anim.playing && followBall)){ const c = hApply(Hfit, cam.cx, cam.cy), spd = 520*dt; panTo(c, -rx*spd*cam.z, -ry*spd*cam.z); } } }
   }
   pad.raf = requestAnimationFrame(padTick);
 }
 function padStart(){ if (!pad.raf){ pad.last = 0; pad.raf = requestAnimationFrame(padTick); } }
-addEventListener('gamepadconnected', e => { pad.idx = e.gamepad.index; padStart(); toast('Controller connected — A plays, D-pad steps, bumpers pick who to follow, Y for over-the-shoulder.'); });
-addEventListener('gamepaddisconnected', e => { if (pad.idx === e.gamepad.index) pad.idx = null; toast('Controller disconnected.'); });
+addEventListener('mousemove', e => { if (e.isTrusted && pad.on && (e.movementX || e.movementY)) padShow(false); }, true);
+addEventListener('gamepadconnected', e => { pad.idx = e.gamepad.index; padStart(); toast('Controller connected — move the left stick for the cursor, press View / Share for the button map.'); });
+addEventListener('gamepaddisconnected', e => { if (pad.idx === e.gamepad.index) pad.idx = null; padShow(false); toast('Controller disconnected.'); });
 if (navigator.getGamepads && [...navigator.getGamepads()].some(Boolean)) padStart();
 function applyView(){
   if (otsActive() && ots){ applyOTS(); syncZoomUI(); return; }
