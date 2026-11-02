@@ -1579,7 +1579,7 @@ const OTS = {arm:5.5, pivot:1.6, side:.6, fov:90, aim:4, aimDown:21.5, aimUp:-20
 /* in-game players are ~1.9 units tall; the board's figures are drawn bigger so they read from above */
 const OTS_BR = .3; /* in-game ball radius next to a ~1.9-unit player */
 const figK = () => camv && camv.ots ? .76 : 1;
-const otsActive = () => otsOn && anim.playing && followBall && followId !== 'ball' && !!piece(followId) && glReady();
+const otsActive = () => otsOn && followBall && followId !== 'ball' && !!piece(followId) && glReady(); /* any time, playing or not; the board is look-only while it is on */
 function otsUpdate(pos, snap){
   const id = followId, q = pos[id]; if (!q) return;
   if (!ots || ots.id !== id || snap){ const pc = piece(id), b = pos.ball, toward = b && dist(b, q) > 3 ? Math.atan2(b.y - q.y, b.x - q.x) : (pc.team === 'home' ? 0 : Math.PI);
@@ -1695,8 +1695,9 @@ function drawCrosshair(){
 }
 /* drag to look around while riding along */
 cv.addEventListener('pointerdown', e => {
-  if (!otsActive() || e.button > 0 || !ots) return;
-  e.stopImmediatePropagation(); e.preventDefault();
+  if (!otsActive() || !ots) return;
+  e.stopImmediatePropagation(); e.preventDefault(); if (e.button > 0) return;
+  if (!anim.playing && tool !== 'select' && !otsWarned){ otsWarned = true; toast('Drawing is off in over-the-shoulder. Drag to look around, or turn it off to draw.'); }
   otsLook = {id:e.pointerId, x:e.clientX, y:e.clientY, h:ots.h, p:ots.pitch || 0}; ots.manual = true; cv.style.cursor = 'grabbing';
   try { cv.setPointerCapture(e.pointerId); } catch {}
 }, true);
@@ -1707,6 +1708,9 @@ cv.addEventListener('pointermove', e => {
   if (!(anim.phase === 'move')) draw();
 }, true);
 for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, e => { if (otsLook && e.pointerId === otsLook.id){ otsLook = null; cv.style.cursor = ''; e.stopImmediatePropagation(); } }, true);
+/* look-only: no hovering players, right-click menus or double-click edits while over-the-shoulder is on */
+let otsWarned = false;
+for (const ev of ['pointermove', 'pointerup', 'contextmenu', 'dblclick', 'click']) cv.addEventListener(ev, e => { if (otsActive()){ e.stopImmediatePropagation(); if (ev === 'contextmenu' || ev === 'dblclick') e.preventDefault(); } }, true);
 /* ---------- Controller: the whole app with a gamepad (Xbox / PlayStation / most USB pads, standard layout) ----------
    A magnetic crosshair stands in for the mouse: it slows over anything clickable and settles onto it when you let go of the stick.
    Left stick: cursor   A: click (hold to drag / draw)   B: back / cancel   X: right-click menu   Y: undo
@@ -1742,7 +1746,7 @@ function padTargets(now){
     out.push({el, x:cx, y:cy, r});
   }
   /* players and the ball on the board, where a click on them lands */
-  if (doc && !anim.playing){ const cr = cv.getBoundingClientRect(), pos = frame().pos;
+  if (doc && !anim.playing && !(camv && camv.ots)){ const cr = cv.getBoundingClientRect(), pos = frame().pos;
     for (const pc of doc.pieces){ if (pc.team !== 'ball' && !doc.show[pc.team]) continue; const q = pos[pc.id]; if (!q) continue;
       const sp = hApply(Hf, q.x, q.y); if (!(sp.w > 0)) continue; const x = cr.left + sp.x, y = cr.top + sp.y; if (x < cr.left || y < cr.top || x > cr.right || y > cr.bottom) continue;
       const rad = clamp(Math.sqrt(Math.abs(hJac(Hf, q.x, q.y).a*hJac(Hf, q.x, q.y).d))*(pc.team === 'ball' ? BR : PR), 9, 40);
@@ -3342,7 +3346,7 @@ function startPlay(){
   if (otsActive()){ otsUpdate(frame().pos, true); applyView(); }
   syncPlayBtn(); renderTimeline(); updateCaption(); anim.raf = requestAnimationFrame(tick);
 }
-function stopPlay(){ if (!anim.playing) return; anim.playing = false; anim.kicks = []; endOTS(); anim.phase = 'idle'; cancelAnimationFrame(anim.raf); syncPlayBtn(); renderTimeline(); updateCaption(); draw(); }
+function stopPlay(){ if (!anim.playing) return; anim.playing = false; anim.kicks = []; otsLook = null; anim.phase = 'idle'; cancelAnimationFrame(anim.raf); syncPlayBtn(); renderTimeline(); updateCaption(); draw(); }
 function tick(now){
   if (!anim.playing) return;
   if (anim.phase === 'move'){
@@ -4890,7 +4894,8 @@ $('#zoomPct').addEventListener('click', zoomFit);
 $('#zoomFollow').addEventListener('change', e => { const v = e.target.value; if (!v) setFollow(false); else setFollow(true, v); e.target.blur(); });
 for (const ev of ['focus', 'pointerdown']) $('#zoomFollow').addEventListener(ev, buildFollowOpts);
 $('#otsBtn').addEventListener('click', () => { otsOn = !otsOn; saveSettings(); syncZoomUI(); if (!otsOn) endOTS();
-  toast(otsOn ? (followBall && followId !== 'ball' ? 'Over-the-shoulder on: press Space to ride along behind them.' : 'Over-the-shoulder on. Pick a player in Follow (1–0), then play.') : 'Over-the-shoulder off.'); });
+  if (otsOn){ hoverId = null; draft = null; if (sel){ sel = null; syncSel(); } } redraw();
+  toast(otsOn ? (followBall && followId !== 'ball' ? 'Over-the-shoulder on: drag to look around, Space to play. Drawing is off until you turn it off.' : 'Over-the-shoulder on. Pick a player in Follow (1–0) to stand behind them.') : 'Over-the-shoulder off — drawing is back.'); });
 $('#focusBtn').addEventListener('click', () => { focusOn = !focusOn; saveSettings(); syncZoomUI(); redraw();
   toast(focusOn ? (followBall && followId !== 'ball' ? 'Focus on: everyone else dims during playback.' : 'Focus on. Pick a player in Follow to focus on them during playback.') : 'Focus off.'); });
 $('#fsBtn').addEventListener('click', () => {
@@ -4929,6 +4934,7 @@ document.addEventListener('keydown', e => {
     if (dgt != null){ const n = dgt === 0 ? 10 : dgt, list = ['home', 'away'].flatMap(t => doc.pieces.filter(p => p.team === t).slice(0, 5)), pc = list[n - 1]; if (!pc) return; id = pc.id; }
     if (followBall && followId === id) setFollow(false); else setFollow(true, id);
     return; }
+  if ((k === 'delete' || k === 'backspace') && otsActive()) return; /* look-only in over-the-shoulder */
   if ((k === 'delete' || k === 'backspace') && bankReaim()){ e.preventDefault(); return; }
   if (k === 'delete' || k === 'backspace'){ e.preventDefault(); if (selShape()) deleteSel(); else if (hoverId) removePiece(hoverId); return; }
   if (k === 'arrowright'){ e.preventDefault(); goStep(cur + 1); return; }
