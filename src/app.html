@@ -767,7 +767,7 @@ const HINTS = {
   select:'<b>Move</b> · drag players and the ball. A player on the ball carries it. Click a drawing to select it. Double-click a player to relabel.',
   run:'<b>Run</b> · draw an off-ball run starting on a player. Curves follow your stroke.',
   pass:'<b>Pass</b> · drag from the ball carrier to the target. Shift while drawing makes it aerial.',
-  shot:'<b>Shot</b> · drag from the ball carrier toward goal. Shift while drawing makes it aerial.',
+  shot:'<b>Shot</b> · drag from the ball carrier to where it should go. Shift: aerial. Scroll or [ ] while drawing: curve. Right-click a shot to change its curve.',
   air:'<b>Aerial pass</b> · drag from the ball carrier to the target. Anyone near the passer blocks the lift. Right-click it to choose Control or Volley for the receiver.',
   dribble:'<b>Dribble</b> · draw the carry path starting on the ball carrier.',
   bank:'<b>Wall pass</b> · drag from the passer into a wall until it snaps, then keep dragging to pull the rebound out at the true angle. Reach the next wall and it carries on off the corner. Shift lofts it.',
@@ -1305,8 +1305,8 @@ function planCombo(f, pl, carrier, nearest){
       if (q.dive) E = {x:q.contact.x, y:q.contact.y};
       else if (q.recv){ const rp = at(q.recv, t1), d = endDir(q.pts), sg2 = q.self ? 1 : -1; E = {x:rp.x + sg2*d.x*FOOT, y:rp.y + sg2*d.y*FOOT}; }
       const into = !q.dive && goalAt(q.pts[q.pts.length - 1]); if (into) E = {x:into.x, y:into.y};
-      const pts = q.air ? airArc([S.x, S.y], [E.x, E.y]) : [[S.x, S.y], ...q.pts.slice(1, -1), [E.x, E.y]];
-      tl.ball.push({k:'fly', lin:1, sid:q.s.id || null, strike:!!q.s.shot, bankAir:q.s.type === 'bank' && q.s.air ? wallHeight(q.s, bankOf(q.s)) : null, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
+      const kc = curveK(q.s), pts = q.air ? airArc([S.x, S.y], [E.x, E.y], kc) : kc ? curvePts([S.x, S.y], [E.x, E.y], kc) : [[S.x, S.y], ...q.pts.slice(1, -1), [E.x, E.y]];
+      tl.ball.push({k:'fly', lin:1, ...(kc ? {kc} : {}), sid:q.s.id || null, strike:!!q.s.shot, bankAir:q.s.type === 'bank' && q.s.air ? wallHeight(q.s, bankOf(q.s)) : null, bounces:q.s.type === 'bank' ? bounceFracs(q.s, pts) : null, t0, t1, pts:pts.map(r2), air:q.air, shot:!!into, recv:q.recv || null, deflect:!!q.deflect, save:q.dive ? q.dive.mode : null});
       lastBall = E;
     }
   }
@@ -1316,6 +1316,9 @@ function planCombo(f, pl, carrier, nearest){
 const easeIn2 = u => u*u*(2 - u), easeOut2 = u => 1 - easeIn2(1 - u);
 /* how much of each arrow has been travelled at time t (0..1), by the arrow's id */
 function legFrac(g, u){ if (!g.lin) return u; const sp = g.split; return sp ? (u < sp.ft ? u/sp.ft*sp.fd : sp.fd + (u - sp.ft)/((1 - sp.ft) || 1)*(1 - sp.fd)) : u; }
+/* the ball's ground track in the 3D views: straight to the target, or bent by shot curve */
+function flyStraight(b, e){ const a = P(b.pts[0]), z = P(b.pts[b.pts.length - 1]); if (!b.kc) return {x:a.x + (z.x - a.x)*e, y:a.y + (z.y - a.y)*e};
+  const c = curveAt([a.x, a.y], [z.x, z.y], b.kc, e); return {x:c[0], y:c[1]}; }
 function shapeProgress(tl, t){
   const m = {};
   for (const id in tl.tracks) for (const g of tl.tracks[id]){ if (!g.sid) continue;
@@ -1336,7 +1339,7 @@ function eatenShapes(shapes, prog){
     const p = prog[s.id]; if (p == null || p <= .001){ out.push(s); continue; } if (p >= .999) continue;
     if (s.type === 'arrow' && s.style === 'pass' && s.air){ out.push({...s, cut:p, trimmed:true}); continue; } /* stays an arc, eaten along its flight */
     if (s.type === 'bank' && s.air){ out.push({...s, cut:p, trimmed:true}); continue; }
-    if (s.type === 'arrow'){ const r = trimFrom(s.pts, p); if (pathLen(r) > .9) out.push({...s, trimmed:true, pts:r}); }
+    if (s.type === 'arrow'){ const r = trimFrom(shotPts(s), p); if (pathLen(r) > .9) out.push({...s, curve:0, trimmed:true, pts:r}); }
     else if (s.type === 'bank'){ const r = trimFrom(passPts(s), p); if (pathLen(r) > .9) out.push({type:'arrow', style:'pass', trimmed:true, id:s.id, color:s.color, pts:r}); }
   }
   return out;
@@ -1413,14 +1416,14 @@ function buildNextFrame(d, idx){
   for (const s of f.shapes){
     if (ballMoved) break;
     if (!((s.type === 'arrow' && s.style === 'pass') || s.type === 'bank') || !fromBall(s)) continue;
-    let pts = s.type === 'bank' ? bankOf(s) : {pts:s.pts, ok:true};
+    let pts = s.type === 'bank' ? bankOf(s) : {pts:shotPts(s), ok:true};
     pts = pts.ok ? pts.pts : (s.type === 'bank' ? [s.a, s.t] : s.pts);
     const end = pts[pts.length-1]; let bp = P(end);
     const recv = pl.find(p => p.id !== carrier && dist(pos[p.id], bp) < 2.2);
     if (recv){ const dir = endDir(pts), off = PR + BR - .2; bp = {x:pos[recv.id].x - dir.x*off, y:pos[recv.id].y - dir.y*off}; }
     const into = goalAt(end); if (into){ bp = {x:into.x, y:into.y}; shot = true; }
     pos.ball = bp;
-    paths.ball = s.air && s.type !== 'bank' ? airArc([f.pos.ball.x, f.pos.ball.y], [bp.x, bp.y]) : [[f.pos.ball.x, f.pos.ball.y], ...pts.slice(1, -1), [bp.x, bp.y]];
+    paths.ball = s.air && s.type !== 'bank' ? airArc([f.pos.ball.x, f.pos.ball.y], [bp.x, bp.y], curveK(s)) : [[f.pos.ball.x, f.pos.ball.y], ...pts.slice(1, -1), [bp.x, bp.y]];
     ballMoved = true; passMoved = true; if (s.air){ ballAir = true; recvMode = s.recv || 'control'; }
     if (s.type === 'bank'){ const bb = bankOf(s); if (bb.ok){ const T = pathLen(paths.ball) || 1, st = [[f.pos.ball.x, f.pos.ball.y]];
       bounceList = bb.bounces.map(q => { st.push(q); return pathLen(st)/T; }); bounceAt = bounceList[0]; if (s.air) bankHeight = wallHeight(s, bb); } }
@@ -1712,7 +1715,7 @@ for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, e => { 
    View / Share: controller map   L3: cycle who the camera follows   R3: fit the board / re-centre the look */
 const PAD_MAP = [['Left stick', 'Move the cursor (it locks onto buttons and players)'], ['A / Cross', 'Click · hold to drag or draw'], ['B / Circle', 'Back / cancel'], ['X / Square', 'Right-click menu (Extra Effort, keeper jump…)'], ['Y / Triangle', 'Undo'],
   ['LB / RB', 'Previous / next tool'], ['LT (hold)', 'Aerial / lofted (Shift)'], ['RT', 'Extra Effort on the run you are drawing (Q)'], ['D-pad ← →', 'Previous / next step'], ['D-pad ↑ ↓', 'Zoom in / out'],
-  ['Right stick', 'Pan the board · scroll a panel · look around in over-the-shoulder'], ['Menu / Options', 'Play / pause'], ['L3', 'Cycle who the camera follows'], ['R3', 'Fit the board · re-centre the look'], ['View / Share', 'Show / hide this map']];
+  ['Right stick', 'Pan the board · scroll a panel · look around in over-the-shoulder · left/right bends a shot while you draw it'], ['Menu / Options', 'Play / pause'], ['L3', 'Cycle who the camera follows'], ['R3', 'Fit the board · re-centre the look'], ['View / Share', 'Show / hide this map']];
 const pad = {raf:0, prev:[], idx:null, last:0, on:false, x:innerWidth/2, y:innerHeight/2, held:false, downEl:null, downAt:null, lock:null, tgts:[], tgtT:0, shift:false, slider:null, moved:false};
 const PAD_DEAD = .16, padAxis = v => Math.abs(v) < PAD_DEAD ? 0 : (v - Math.sign(v)*PAD_DEAD)/(1 - PAD_DEAD);
 (() => { const st = document.createElement('style'); st.textContent = `
@@ -1829,7 +1832,8 @@ function padTick(now){
           if (pad.held && pad.downAt && Math.hypot(pad.x - pad.downAt.x, pad.y - pad.downAt.y) > 6) pad.moved = true; } }
     }
     /* right stick */
-    if (rx || ry){
+    if ((rx || ry) && pad.held && pad.downEl === cv && draft && draft.type === 'arrow' && draft.shot){ if (rx){ draft.curve = clamp((draft.curve || 0) + rx*1.4*dt, -1, 1); if (Math.abs(draft.curve) < .02) draft.curve = 0; pad.bendT = now; draw(); } }
+    else if (rx || ry){
       if (otsActive() && ots){ ots.manual = true; ots.h += rx*Math.abs(rx)*2.6*dt;
         ots.pitch = clamp((ots.pitch || 0) - ry*Math.abs(ry)*60*dt, OTS.aim - OTS.aimDown, OTS.aim - OTS.aimUp); if (anim.phase !== 'move') draw(); }
       else { const sc = pad.on && padScrollable(padEl());
@@ -2278,10 +2282,27 @@ function drawRange(c, pos){
 }
 /* Aerial pass: drawn as an arc over a dotted ground shadow. The ball only clears heads after
    passCfg.lift units, so an opponent standing in that first stretch blocks it. */
-function airArc(a, b){
+/* shot curve, measured in game: a full-power shot with full curve lands ~4.05 units off its aim after 33.1 units.
+   That is a constant sideways pull, offset = k·d² from the aim line. Seen against the straight line to where the ball
+   lands it is a symmetric bow (bulging away from the curve), so we keep the drawn end point and show where to aim. */
+const CURVE_K = 4.05/(33.1*33.1);
+const curveK = s => s && s.shot && s.curve ? clamp(s.curve, -1, 1)*CURVE_K : 0; /* + curves right, − left */
+function curveAt(a, b, kc, u){ const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, off = -kc*L*L*u*(1 - u);
+  return [a[0] + dx*u - dy/L*off, a[1] + dy*u + dx/L*off]; }
+function curvePts(a, b, kc){ const out = []; for (let i = 0; i <= 24; i++) out.push(curveAt(a, b, kc, i/24)); return out; }
+const shotPts = s => { const kc = curveK(s); return kc && s.type === 'arrow' ? curvePts(s.pts[0], s.pts[s.pts.length - 1], kc) : s.pts; };
+/* where the crosshair goes in game: along the ball's starting direction, as far away as the target */
+function aimPoint(a, b, kc){ const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, o = -kc*L*L, tx = dx - dy/L*o, ty = dy + dx/L*o, tl = Math.hypot(tx, ty) || 1;
+  return [a[0] + tx/tl*L, a[1] + ty/tl*L]; }
+function drawAimHint(c, a, b, kc, k){
+  const m = aimPoint(a, b, kc); c.save(); c.setLineDash([.5, .5]); c.lineWidth = .14; c.strokeStyle = rgba(k, .55);
+  c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(m[0], m[1]); c.stroke(); c.setLineDash([]);
+  c.beginPath(); c.arc(m[0], m[1], .7, 0, Math.PI*2); c.lineWidth = .16; c.stroke();
+  c.beginPath(); c.moveTo(m[0] - 1.1, m[1]); c.lineTo(m[0] - .35, m[1]); c.moveTo(m[0] + .35, m[1]); c.lineTo(m[0] + 1.1, m[1]); c.stroke(); c.restore(); }
+function airArc(a, b, kc){
   const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, h = Math.min(L*.14, 4.5);
   const cx = (a[0] + b[0])/2 + dy/L*h*2, cy = (a[1] + b[1])/2 - dx/L*h*2, out = [];
-  for (let i = 0; i <= 28; i++){ const t = i/28, u = 1 - t; out.push([u*u*a[0] + 2*u*t*cx + t*t*b[0], u*u*a[1] + 2*u*t*cy + t*t*b[1]]); }
+  for (let i = 0; i <= 28; i++){ const t = i/28, u = 1 - t, o = kc ? -kc*L*L*t*u : 0; out.push([u*u*a[0] + 2*u*t*cx + t*t*b[0] - dy/L*o, u*u*a[1] + 2*u*t*cy + t*t*b[1] + dx/L*o]); }
   return out;
 }
 function liftBlocker(a, b, pos, sf, team){
@@ -2343,22 +2364,23 @@ function drawAirBank(c, s, b, k){
 }
 /* shots: solid and heavier than a pass, with short power ticks across the line */
 function drawShotLine(c, s, k){
-  const body = trimEnd(s.pts, .95);
-  if (!s.trimmed) drawNoTouch(c, s.pts);
+  const sp = shotPts(s), kc = curveK(s), body = trimEnd(sp, .95);
+  if (!s.trimmed) drawNoTouch(c, sp);
+  if (kc && !s.trimmed) drawAimHint(c, s.pts[0], s.pts[s.pts.length - 1], kc, k);
   polyline(c, body); c.setLineDash([]); c.lineWidth = .62; c.strokeStyle = k; c.stroke();
   const d = densify(body, .4), L = d[d.length - 1].d;
   c.beginPath(); for (let x = 1.6; x < L - 1.2; x += 1.6){ const q = d.find(v => v.d >= x) || d[d.length - 1], nx = -q.ty, ny = q.tx;
     c.moveTo(q.x + nx*.55 - q.tx*.25, q.y + ny*.55 - q.ty*.25); c.lineTo(q.x - nx*.55 + q.tx*.25, q.y - ny*.55 + q.ty*.25); }
   c.lineWidth = .2; c.stroke();
-  arrowHead(c, s.pts, k, 1.8);
+  arrowHead(c, sp, k, 1.8);
 }
 function drawAirPass(c, s, k){
-  const a = s.pts[0], b = s.pts[s.pts.length-1];
+  const a = s.pts[0], b = s.pts[s.pts.length-1], kc = curveK(s), gnd = kc ? curvePts(a, b, kc) : [a, b];
   if (s.cut){ /* playing: what is left of the flight */
-    const kk = k, sh = trimFrom([a, b], s.cut);
+    const kk = k, sh = trimFrom(gnd, s.cut);
     c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(kk, .4); polyline(c, sh); c.stroke(); c.restore();
-    if (air3d) air3d.push({a, b, from:s.cut, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:true});
-    else { const arc = trimFrom(airArc(a, b), s.cut); polyline(c, trimEnd(arc, .85)); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = kk; c.stroke(); arrowHead(c, arc, kk, s.shot ? 1.8 : 1.4); }
+    if (air3d) air3d.push({a, b, kc, from:s.cut, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:true});
+    else { const arc = trimFrom(airArc(a, b, kc), s.cut); polyline(c, trimEnd(arc, .85)); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = kk; c.stroke(); arrowHead(c, arc, kk, s.shot ? 1.8 : 1.4); }
     return;
   }
   const pos = scenePos || frame().pos, sf = sceneFrame || frame();
@@ -2366,13 +2388,14 @@ function drawAirPass(c, s, k){
   const blk = liftBlocker(a, b, pos, sf, passer && passer.team);
   const kk = blk ? '#ff5d5d' : k;
   /* ground shadow, with the lift stretch marked */
-  c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(kk, .4); polyline(c, [a, b]); c.stroke();
-  const pre = prefixPath([a, b], passCfg.lift);
+  c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(kk, .4); polyline(c, gnd); c.stroke();
+  const pre = prefixPath(gnd, passCfg.lift);
   c.setLineDash([]); c.lineCap = 'round'; polyline(c, pre.pts); c.lineWidth = .7; c.strokeStyle = blk ? 'rgba(255,93,93,.45)' : 'rgba(255,255,255,.22)'; c.stroke();
   c.restore();
-  if (air3d){ drawNoTouch(c, [a, b]); air3d.push({a, b, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:true}); }
+  if (kc) drawAimHint(c, a, b, kc, kk);
+  if (air3d){ drawNoTouch(c, gnd); air3d.push({a, b, kc, color:kk, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:true}); }
   else {
-    const arc = airArc(a, b);
+    const arc = airArc(a, b, kc);
     drawNoTouch(c, arc);
     polyline(c, trimEnd(arc, .85)); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = kk; c.stroke(); arrowHead(c, arc, kk, s.shot ? 1.8 : 1.4);
   }
@@ -2447,7 +2470,7 @@ function shapeOutline(c, s){
   switch (s.type){
     case 'rect': rr(c, s.x, s.y, s.w, s.h, 1); return true;
     case 'circle': c.beginPath(); c.arc(s.cx, s.cy, s.r, 0, Math.PI*2); return true;
-    case 'pen': case 'arrow': polyline(c, s.air ? airArc(s.pts[0], s.pts[s.pts.length-1]) : s.pts); return true;
+    case 'pen': case 'arrow': polyline(c, s.air ? airArc(s.pts[0], s.pts[s.pts.length-1], curveK(s)) : shotPts(s)); return true;
     case 'bank': polyline(c, bankOf(s).pts); return true;
     case 'dive': polyline(c, [s.a, s.t]); return true;
     case 'text': { const z = textSize(s), w = textWidth(s.text, z); rr(c, s.x - w/2 - .8, s.y - z*.9, w + 1.6, z*1.8, 1); return true; }
@@ -3026,14 +3049,14 @@ function draw3DArcs(list){
   for (const s of list){
     const [ax, ay] = s.a, [bx, by] = s.b, L = Math.hypot(bx - ax, by - ay) || 1, nx = (by - ay)/L, ny = -(bx - ax)/L;
     const bul = Math.min(L*.14, 4.5)*(1 - q3d), hz = clamp(L*.12, 2, 6)*q3d, za = (s.za || 0)*q3d, zb = (s.zb || 0)*q3d, pts = [];
-    const t0 = s.from || 0;
-    for (let i = 0; i <= 32; i++){ const t = t0 + (1 - t0)*i/32, f = 4*t*(1 - t); pts.push(p3(ax + (bx - ax)*t + nx*bul*f, ay + (by - ay)*t + ny*bul*f, za + (zb - za)*t + hz*f)); }
+    const t0 = s.from || 0, cvL = (s.kc || 0)*L*L; /* shot curve bends the ground track */
+    for (let i = 0; i <= 32; i++){ const t = t0 + (1 - t0)*i/32, f = 4*t*(1 - t), o = bul*f + cvL*t*(1 - t); pts.push(p3(ax + (bx - ax)*t + nx*o, ay + (by - ay)*t + ny*o, za + (zb - za)*t + hz*f)); }
     if (pts.some(q => q.w < 1)) continue; /* behind the over-the-shoulder camera */
     const mj = j3((ax + bx)/2, (ay + by)/2, hz), k = Math.sqrt(Math.abs(mj.a*mj.d - mj.b*mj.c));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = s.alpha; ctx.lineCap = 'round';
     /* faint drop lines show how high the ball is */
     if (q3d > .2 && !t0){ ctx.strokeStyle = rgba('#ffffff', .18); ctx.lineWidth = 1; ctx.beginPath();
-      for (const t of [.25, .5, .75]){ const f = 4*t*(1 - t), g = p3(ax + (bx - ax)*t + nx*bul*f, ay + (by - ay)*t + ny*bul*f, 0), u = pts[Math.round(t*32)]; ctx.moveTo(g.x, g.y); ctx.lineTo(u.x, u.y); }
+      for (const t of [.25, .5, .75]){ const f = 4*t*(1 - t), o = bul*f + cvL*t*(1 - t), g = p3(ax + (bx - ax)*t + nx*o, ay + (by - ay)*t + ny*o, 0), u = pts[Math.round(t*32)]; ctx.moveTo(g.x, g.y); ctx.lineTo(u.x, u.y); }
       ctx.stroke(); }
     const end = s.head ? 26 : 32;
     ctx.beginPath(); pts.slice(0, end + 1).forEach((p, i) => ctx[i ? 'lineTo' : 'moveTo'](p.x, p.y));
@@ -3387,7 +3410,7 @@ function drawTweenTL(fa, fb, t){
       const z = z0 + (z1 - z0)*u + 4*clamp(Ls*.08, .6, 3)*u*(1 - u);
       ballLift = clamp(z/(hb + 1.5), 0, 1); if (isPersp()) ballZ = z*q3d; }
     else if (b.air){ ballLift = 4*e*(1 - e);
-      if (isPersp()){ const a = P(b.pts[0]), z = P(b.pts[b.pts.length - 1]); pos.ball = {x:pos.ball.x + (a.x + (z.x - a.x)*e - pos.ball.x)*q3d, y:pos.ball.y + (a.y + (z.y - a.y)*e - pos.ball.y)*q3d}; ballZ = clamp(L*.12, 2, 6)*q3d*4*e*(1 - e); } }
+      if (isPersp()){ const fs = flyStraight(b, e); pos.ball = {x:pos.ball.x + (fs.x - pos.ball.x)*q3d, y:pos.ball.y + (fs.y - pos.ball.y)*q3d}; ballZ = clamp(L*.12, 2, 6)*q3d*4*e*(1 - e); } }
   }
   motionNow = buildMotion(pos, performance.now(), {fly:!!(b && b.k === 'fly' && t <= b.t1), ee:fa, t, tl});
   const prog = shapeProgress(tl, t), moving = fa.shapes.filter(s => prog[s.id] != null), still = fa.shapes.filter(s => prog[s.id] == null);
@@ -3517,6 +3540,7 @@ function clampRect(id, q){
 /* ---------- pointer input ---------- */
 cv.addEventListener('wheel', e => {
   e.preventDefault(); const r = cv.getBoundingClientRect();
+  if (draft && draft.type === 'arrow' && draft.shot && !e.ctrlKey){ const t = performance.now(); if (t - (cv._bendT || 0) > 70){ cv._bendT = t; bendDraft(e.deltaY > 0 ? .1 : -.1); } return; } /* scroll bends the shot you are drawing */
   const dy = clamp(e.deltaMode === 1 ? e.deltaY*33 : e.deltaY, -120, 120); /* one mouse notch ≈ 7%, trackpad pinch ≈ smooth */
   zoomAt(cam.z*Math.exp(-dy*(e.ctrlKey ? .006 : .0007)), e.clientX - r.left, e.clientY - r.top);
 }, {passive:false});
@@ -3680,7 +3704,7 @@ function endPointer(){
       else if (d.stage === 2){ d.awaitClick = true; draft = d; draw(); toast(touchInput ? 'Drag to set how far it rebounds, then lift your finger.' : 'Move along the rebound to set its length, then click. Slide along the wall or right-click to re-aim. Esc cancels.'); return; }
       else toast(d.blocked ? 'A ground pass into the goal mouth goes in. Press Shift to loft it off the glass.' : 'Drag the pass all the way to a wall to bounce it.');
     }
-    if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.shot) sh.shot = true; if (d.air){ sh.air = true; sh.recv = d.recv || 'control'; } } }
+    if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.shot){ sh.shot = true; if (d.curve) sh.curve = d.curve; } if (d.air){ sh.air = true; sh.recv = d.recv || 'control'; } } }
     else if (d.type === 'arrow' || d.type === 'pen'){ const pts = processStroke(d.pts, d.type === 'pen'); if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color, ...(d.ee && d.style !== 'pass' ? {ee:true} : {})}; }
     else if (d.type === 'bank'){ if (Math.hypot(d.t[0] - d.a[0], d.t[1] - d.a[1]) > 2) sh = {type:'bank', a:r2(d.a), t:r2(d.t), wall:d.wall || autoWall(d.a, d.t, d.air), color:d.color}; if (d.air){ sh.air = true; sh.recv = 'control'; } }
     else if (d.type === 'rect'){ if (d.w > 1 && d.h > 1) sh = {type:'rect', x:d.x, y:d.y, w:d.w, h:d.h, color:d.color}; }
@@ -3779,6 +3803,8 @@ function shapeMenu(s){
   if (s.type === 'arrow' && s.style === 'pass'){
     items.push({segment:[['ground','Ground'],['air','Aerial']], current:s.air ? 'air' : 'ground', pick:v => editShape(s.id, x => { if (v === 'air'){ x.air = true; x.recv = x.recv || 'control'; } else { delete x.air; delete x.recv; } })});
     if (s.air && !s.shot) items.push({segment:[['control','Control'],['volley','Volley']], current:s.recv || 'control', pick:v => editShape(s.id, x => { x.recv = v; })});
+    if (s.shot) items.push({range:{min:-1, max:1, step:.05, value:s.curve || 0, label:curveLabel,
+      input:v => { const x = frame().shapes.find(y => y.id === s.id); if (x){ if (Math.abs(v) < .025) delete x.curve; else x.curve = Math.round(v*100)/100; draw(); } }}});
   }
   if (s.type === 'arrow' && s.style !== 'pass') items.push({label:'Extra Effort on this run', key:'Q', checked:!!s.ee, run:() => editShape(s.id, x => { if (x.ee) delete x.ee; else x.ee = true; })});
   if (s.type === 'arrow' && s.style === 'run'){
@@ -3885,7 +3911,7 @@ const SHAPE_NAMES = {dive:'Goalkeeper jump', air:'Aerial pass', run:'Run', pass:
 function syncSel(){
   const s = selShape(); if (!s) sel = null;
   $('#selbar').hidden = !s;
-  if (s){ $('#selLabel').textContent = (SHAPE_NAMES[s.style] || SHAPE_NAMES[s.type] || 'Drawing') + ' selected'; $('#selWall').hidden = s.type !== 'bank'; }
+  if (s){ $('#selLabel').textContent = (s.shot ? 'Shot' : SHAPE_NAMES[s.style] || SHAPE_NAMES[s.type] || 'Drawing') + ' selected'; $('#selWall').hidden = s.type !== 'bank'; }
 }
 function deleteSel(){ const s = selShape(); if (!s) return; snapshot(); const f = frame(); f.shapes = f.shapes.filter(x => x.id !== s.id); sel = null; commit(); }
 function cycleWall(){
@@ -4928,6 +4954,9 @@ document.addEventListener('keydown', e => {
 });
 
 /* keys that change the drawing in progress */
+const curveLabel = v => Math.abs(v) < .025 ? 'Curve: none (◀ left · right ▶)' : `Curve: ${Math.round(Math.abs(v)*100)}% ${v < 0 ? 'left' : 'right'}`;
+function bendDraft(dv){ if (!(draft && draft.type === 'arrow' && draft.shot)) return false;
+  let v = clamp(Math.round(((draft.curve || 0) + dv)*100)/100, -1, 1); if (Math.abs(v) < .025) v = 0; draft.curve = v; toast(curveLabel(v)); draw(); return true; }
 function draftKey(k, e){
   if (e.repeat) return false;
   const isPass = draft.type === 'arrow' && draft.style === 'pass';
@@ -4935,6 +4964,7 @@ function draftKey(k, e){
     draft.air = !draft.air; if (draft.air) draft.recv = draft.recv || 'control'; else delete draft.recv;
     if (draft.type === 'bank2' && draft.stage === 1 && draft.last) bankAim(draft, draft.last);
     draw(); return true; }
+  if ((k === '[' || k === ']') && isPass && draft.shot) return bendDraft(k === ']' ? .25 : -.25);
   if (k === 'v' && isPass && draft.air){ draft.recv = draft.recv === 'volley' ? 'control' : 'volley'; draw(); return true; }
   if (k === 'q' && draft.type === 'arrow' && (draft.style === 'run' || draft.style === 'dribble')){
     const d = draft; d.ee = !d.ee; const rp = d.runner && piece(d.runner); d.limit = runLimit(rp, frame()); if (d.ee && d.limit < Infinity && !(rp && hasEE(frame(), rp.id))) d.limit += passCfg.eeAdd;

@@ -25,3 +25,5 @@ The session cannot upload release assets directly (binary uploads are blocked); 
 ## Real-time speeds (from Joseph, Oct 31) — `SPEED` in app.html
 Sprint 10 m (10.437 units) / 1.15 s · Extra Effort 10 m / 1 s, lasts 1.5 s · full-power shot 33.4 units / 1 s · full-power tap pass 33.4 units / 1.15 s.
 Estimates: dribble = 0.78 × sprint, lob = tap pass speed, keeper dive 9 units/s. Playback is real time (constant speed); the ruler shows run/EE/pass/shot times.
+
+- Shot curve (measured in game): full curve on a full-power shot drifts 4.05 units off the aim line after 33.1 units -> constant sideways pull, offset = k*d^2, k = CURVE_K = 4.05/33.1^2. Shapes keep the landing point; `curve` in [-1,1] (+ right) bows the path (symmetric vs the chord) and drawAimHint shows the in-game aim point.
