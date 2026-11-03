@@ -1,4 +1,4 @@
-# REMATCH Tactics — notes for Claude
+# Wing-Board (formerly REMATCH Tactics) — notes for Claude
 
 Tactics board for the 5v5 football game REMATCH, made by BlueWing (Joseph). One self-contained HTML app.
 
@@ -9,7 +9,7 @@ Tactics board for the 5v5 football game REMATCH, made by BlueWing (Joseph). One 
 - `web/` — website / phone home-screen app assets (manifest, service worker, icons). `index.html` is generated.
 - `extras/plain-html-folder/` — launchers + README for the plain HTML zip.
 - `scripts/build-html.sh` — builds `build/rematch-tactics.html` and `build/web/` (stamps VERSION + update repo).
-- `scripts/build-windows.sh` — builds `out/REMATCH-Tactics-Setup.exe` (Electron 38.2.0 + NSIS). Linux; needs nsis, node.
+- `scripts/build-windows.sh` — builds `out/Wing-Board-Setup.exe` (Electron 38.2.0 + NSIS). Linux; needs nsis, node.
 - `notes/vX.Y.Z.md` — optional release notes used by the workflow.
 
 ## Releasing (Joseph only uses the Windows installer)
@@ -19,7 +19,8 @@ Tactics board for the 5v5 football game REMATCH, made by BlueWing (Joseph). One 
 The session cannot upload release assets directly (binary uploads are blocked); the workflow does it.
 
 ## Conventions
-- Asset name stays `REMATCH-Tactics-Setup.exe` (README links use releases/latest/download/...).
+- Assets: `Wing-Board-Setup.exe` plus an identical `REMATCH-Tactics-Setup.exe` for links shared before the rename. The in-app updater matches any `Setup.exe`.
+- Renamed to Wing-Board in v1.0.21. Internal ids stay: repo name, localStorage keys (`rematch-tactics.*`), `.rematch.json` files. Desktop keeps using an existing `%APPDATA%/REMATCH Tactics` data folder and `Documents/REMATCH Tactics Plays`; the installer removes the old `REMATCH Tactics` install/shortcuts/uninstall entry.
 - Also publish the built page to the claude.ai artifact when asked.
 
 ## Real-time speeds (from Joseph, Oct 31) — `SPEED` in app.html

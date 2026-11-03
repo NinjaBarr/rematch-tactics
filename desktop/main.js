@@ -1,11 +1,13 @@
-// REMATCH Tactics desktop app: the board in its own window (no browser needed).
+// Wing-Board desktop app (formerly REMATCH Tactics): the board in its own window (no browser needed).
 const {app, BrowserWindow, Menu, shell, screen, ipcMain, dialog} = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 
-app.setName('REMATCH Tactics');
-if (process.platform === 'win32') app.setAppUserModelId('com.bluewing.rematch-tactics');
+app.setName('Wing-Board');
+/* keep everyone's saved plays and settings: keep using the old data folder if this computer already has one */
+{ const oldData = path.join(app.getPath('appData'), 'REMATCH Tactics'); app.setPath('userData', fs.existsSync(oldData) ? oldData : path.join(app.getPath('appData'), 'Wing-Board')); }
+if (process.platform === 'win32') app.setAppUserModelId('com.bluewing.wing-board');
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let win = null;
@@ -13,7 +15,7 @@ function createWindow(){
   const wa = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
     width: Math.round(wa.width*.9), height: Math.round(wa.height*.9), minWidth: 860, minHeight: 560,
-    show: false, backgroundColor: '#0b1018', title: 'REMATCH Tactics',
+    show: false, backgroundColor: '#0b1018', title: 'Wing-Board',
     icon: path.join(__dirname, 'icon.png'), autoHideMenuBar: true,
     webPreferences: {contextIsolation: true, sandbox: true, spellcheck: false, autoplayPolicy: 'no-user-gesture-required', preload: path.join(__dirname, 'preload.js')}
   });
@@ -38,11 +40,11 @@ Menu.setApplicationMenu(process.platform === 'darwin'
 app.on('second-instance', () => { if (win){ if (win.isMinimized()) win.restore(); win.focus(); } });
 
 /* ---------- plays folder ----------
-   Plays are .rematch.json files in a folder on this computer (default: Documents/REMATCH Tactics Plays).
+   Plays are .rematch.json files in a folder on this computer (default: Documents/Wing-Board Plays, or the older REMATCH Tactics Plays if it exists).
    Subfolders are categories. The board can only touch files inside that folder. */
 const cfgFile = () => path.join(app.getPath('userData'), 'plays-folder.json');
 let root = null, watcher = null, fireT = null;
-function defaultRoot(){ return path.join(app.getPath('documents'), 'REMATCH Tactics Plays'); }
+function defaultRoot(){ const old = path.join(app.getPath('documents'), 'REMATCH Tactics Plays'); return fs.existsSync(old) ? old : path.join(app.getPath('documents'), 'Wing-Board Plays'); }
 function getRoot(){
   if (root) return root;
   try { const c = JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); if (c.root && fs.existsSync(c.root)) root = c.root; } catch {}
@@ -106,7 +108,7 @@ ipcMain.handle('plays:choose', async () => {
 ipcMain.handle('update:install', async (e, url) => {
   if (process.platform !== 'win32') return {ok: false, reason: 'windows only'};
   if (typeof url !== 'string' || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/[^?#]+\.exe$/i.test(url)) return {ok: false, reason: 'bad url'};
-  const file = path.join(app.getPath('temp'), 'REMATCH-Tactics-Update-' + Date.now() + '.exe');
+  const file = path.join(app.getPath('temp'), 'Wing-Board-Update-' + Date.now() + '.exe');
   try {
     const res = await fetch(url, {redirect: 'follow'});
     if (!res.ok || !res.body) return {ok: false, reason: 'download failed ' + res.status};

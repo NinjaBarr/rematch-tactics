@@ -26,9 +26,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v$(tr -d ' \n\r' < VERSION)"
-          NOTES=notes/$TAG.md; [ -f "$NOTES" ] || { echo "REMATCH Tactics ${TAG#v}" > /tmp/n.md; NOTES=/tmp/n.md; }
+          NOTES=notes/$TAG.md; [ -f "$NOTES" ] || { echo "Wing-Board ${TAG#v}" > /tmp/n.md; NOTES=/tmp/n.md; }
+          # same installer under the old name too, so links shared before the rename keep working
+          cp out/Wing-Board-Setup.exe out/REMATCH-Tactics-Setup.exe
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" out/REMATCH-Tactics-Setup.exe --clobber
+            gh release upload "$TAG" out/Wing-Board-Setup.exe out/REMATCH-Tactics-Setup.exe --clobber
           else
-            gh release create "$TAG" out/REMATCH-Tactics-Setup.exe --title "REMATCH Tactics ${TAG#v}" --notes-file "$NOTES"
+            gh release create "$TAG" out/Wing-Board-Setup.exe out/REMATCH-Tactics-Setup.exe --title "Wing-Board ${TAG#v}" --notes-file "$NOTES"
           fi

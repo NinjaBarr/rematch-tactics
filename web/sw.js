@@ -1,4 +1,4 @@
-/* REMATCH Tactics offline cache. The page is checked online first so updates arrive; everything works offline after one visit. */
+/* Wing-Board offline cache. The page is checked online first so updates arrive; everything works offline after one visit. */
 const CACHE = 'rematch-tactics-20261029060725';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/apple-touch-icon.png', './icons/icon-192.png', './icons/icon-512.png', './icons/favicon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });

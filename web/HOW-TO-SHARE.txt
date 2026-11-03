@@ -1,4 +1,4 @@
-REMATCH Tactics - put it online so anyone (iPhone, Android, PC) can use it
+Wing-Board - put it online so anyone (iPhone, Android, PC) can use it
 ==========================================================================
 
 This folder is a complete website. Once it's online you get a normal web

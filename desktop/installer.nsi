@@ -1,7 +1,8 @@
-; REMATCH Tactics installer: per-user install (no admin needed), Start menu + desktop shortcuts, uninstaller.
+; Wing-Board installer (formerly REMATCH Tactics): per-user install (no admin needed), Start menu + desktop shortcuts, uninstaller.
 Unicode true
 !include "MUI2.nsh"
-!define APPNAME "REMATCH Tactics"
+!define APPNAME "Wing-Board"
+!define OLDNAME "REMATCH Tactics"
 !define COMPANY "BlueWing"
 !ifdef VER
 !define VERSION "${VER}"
@@ -12,7 +13,8 @@ Unicode true
 !ifndef SRC
 !error "pass -DSRC=<unpacked app folder>"
 !endif
-!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\RematchTactics"
+!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\WingBoard"
+!define OLDUNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\RematchTactics"
 
 Name "${APPNAME}"
 OutFile "${OUT}"
@@ -46,6 +48,18 @@ VIAddVersionKey "LegalCopyright" "${COMPANY}"
 Section "Install"
   ; close a running copy so its files can be replaced
   nsExec::Exec 'taskkill /F /IM "${APPNAME}.exe"'
+  ; replace an older "REMATCH Tactics" install: close it, remove its program files, shortcuts and uninstall entry
+  ; (its saved plays and settings are kept and the new app keeps using them)
+  nsExec::Exec 'taskkill /F /IM "${OLDNAME}.exe"'
+  ReadRegStr $0 HKCU "Software\${COMPANY}\${OLDNAME}" "InstallDir"
+  StrCmp $0 "" 0 +2
+  StrCpy $0 "$LOCALAPPDATA\Programs\${OLDNAME}"
+  IfFileExists "$0\${OLDNAME}.exe" 0 +2
+  RMDir /r "$0"
+  Delete "$SMPROGRAMS\${OLDNAME}.lnk"
+  Delete "$DESKTOP\${OLDNAME}.lnk"
+  DeleteRegKey HKCU "${OLDUNINSTKEY}"
+  DeleteRegKey HKCU "Software\${COMPANY}\${OLDNAME}"
   SetOutPath "$INSTDIR"
   File /r "${SRC}/*"
   File "${ICO}"
@@ -74,5 +88,5 @@ Section "Uninstall"
   RMDir /r "$INSTDIR"
   DeleteRegKey HKCU "${UNINSTKEY}"
   DeleteRegKey HKCU "Software\${COMPANY}\${APPNAME}"
-  ; saved plays live in %APPDATA%\REMATCH Tactics and are kept
+  ; saved plays and settings (in %APPDATA%) are kept
 SectionEnd
