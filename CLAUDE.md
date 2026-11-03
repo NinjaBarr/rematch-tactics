@@ -28,3 +28,5 @@ Sprint 10 m (10.437 units) / 1.15 s · Extra Effort 10 m / 1 s, lasts 1.5 s · f
 Estimates: dribble = 0.78 × sprint, lob = tap pass speed, keeper dive 9 units/s. Playback is real time (constant speed); the ruler shows run/EE/pass/shot times.
 
 - Shot curve (measured in game): full curve on a full-power shot drifts 4.05 units off the aim line after 33.1 units -> constant sideways pull, offset = k*d^2, k = CURVE_K = 4.05/33.1^2. Shapes keep the landing point; `curve` in [-1,1] (+ right) bows the path (symmetric vs the chord) and drawAimHint shows the in-game aim point.
+
+- Timed steps (v1.0.22): doc.timed + doc.stepSecs, frame.dur per step (new steps copy it). timedTLs() builds a continuous clock: each step planned at real speed (baseSecs via buildNextFrame), overflow past the step time carries into the next step; the ball group (ball holders + diving keepers) waits for carried ball/players together, others only for their own carried legs. Playback reads TL(fb) instead of fb.tl when timed; saved frames are never modified. Editing view dims what overflows (timedLayers + drawTimedMarks), reach rings via drawReachRings. tls[N] is a virtual step after the last.

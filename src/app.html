@@ -291,6 +291,7 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .note{flex:1 1 240px;min-width:0;height:34px}
 .tl-opts{display:flex;align-items:center;gap:6px}
 .tl-opts select{height:34px}
+#timedClock{position:absolute;left:12px;bottom:12px;z-index:5;padding:4px 10px;border-radius:8px;background:rgba(8,12,18,.78);border:1px solid var(--line);font:700 20px var(--f-mono);color:#fff;letter-spacing:.04em;pointer-events:none}
 
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:9px;font-weight:600;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:20;max-width:calc(100% - 32px)}
 
@@ -684,6 +685,9 @@ body.clean .touchbar{display:none}
     <input class="field note" id="note" placeholder="Coaching note for this step" maxlength="160" aria-label="Step note">
     <div class="tl-opts">
       <select class="field" id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      <label class="eye" title="Timed steps: every step lasts a set time and everything moves at real game speed. Anything that doesn't fit carries on into the next step."><input type="checkbox" id="timedTog">Timed</label>
+      <span id="timedBox" hidden><input class="field" id="stepDur" type="number" min="0.1" max="30" step="0.1" aria-label="This step's length in seconds" title="How long this step lasts (seconds). New steps copy it." style="width:66px;height:34px"> s
+        <button class="btn icon" id="ringsBtn" aria-pressed="false" title="Reach rings: how far each player and the ball can get in this step's time" aria-label="Reach rings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" stroke-dasharray="3 2.5"/></svg></button></span>
       <label class="eye"><input type="checkbox" id="loop">Loop</label>
       <label class="eye" title="Kick sounds for passes and shots during playback"><input type="checkbox" id="sound">Sound</label>
       <label class="eye" title="Players step, dribble and kick during playback"><input type="checkbox" id="animMv">Moves</label>
@@ -2376,10 +2380,15 @@ function drawShotLine(c, s, k){
   c.beginPath(); for (let x = 1.6; x < L - 1.2; x += 1.6){ const q = d.find(v => v.d >= x) || d[d.length - 1], nx = -q.ty, ny = q.tx;
     c.moveTo(q.x + nx*.55 - q.tx*.25, q.y + ny*.55 - q.ty*.25); c.lineTo(q.x - nx*.55 + q.tx*.25, q.y - ny*.55 + q.ty*.25); }
   c.lineWidth = .2; c.stroke();
-  arrowHead(c, sp, k, 1.8);
+  if (!s.nohead) arrowHead(c, sp, k, 1.8);
 }
 function drawAirPass(c, s, k){
   const a = s.pts[0], b = s.pts[s.pts.length-1], kc = curveK(s), gnd = kc ? curvePts(a, b, kc) : [a, b];
+  if (s.upto){ /* timed step: only the part of the flight that happens inside this step */
+    c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(k, .4); polyline(c, trimTo(gnd, s.upto)); c.stroke(); c.restore();
+    if (air3d) air3d.push({a, b, kc, to:s.upto, color:k, alpha:c.globalAlpha, dots:!s.shot, solid:!!s.shot, head:false});
+    else { polyline(c, trimTo(airArc(a, b, kc), s.upto)); c.setLineDash(s.shot ? [] : DOTS); c.lineWidth = s.shot ? .55 : .42; c.strokeStyle = k; c.stroke(); c.setLineDash([]); }
+    return; }
   if (s.cut){ /* playing: what is left of the flight */
     const kk = k, sh = trimFrom(gnd, s.cut);
     c.save(); c.setLineDash([]); c.lineWidth = .12; c.strokeStyle = rgba(kk, .4); polyline(c, sh); c.stroke(); c.restore();
@@ -2527,14 +2536,14 @@ function drawShape(c, s, alpha, selected){
       if (s.style === 'pass' && s.air){ drawAirPass(c, s, k); break; }
       if (s.style === 'run' && passCfg.runSame){ const f = sceneFrame || frame(), lim = runLimitS(s, f);
         if (pathLen(s.pts) > lim + .05){ const e = s.pts[s.pts.length-1], d = endDir(s.pts); fieldText(c, 'OVER MAX', e[0] + d.x*2.6, e[1] + d.y*2.6, .95, '#ff5d5d'); } }
-      const body = s.style === 'dribble' ? wavy(trimEnd(s.pts, .85)) : trimEnd(s.pts, .85);
+      const body0 = s.nohead ? s.pts : trimEnd(s.pts, .85), body = s.style === 'dribble' ? wavy(body0) : body0;
       if (s.ee){ polyline(c, body); c.setLineDash([]); c.lineWidth = 1.05; c.strokeStyle = 'rgba(90,205,255,.33)'; c.stroke(); c.lineWidth = .62; c.strokeStyle = 'rgba(150,235,255,.55)'; c.stroke();
         const a = s.pts[0], b = s.pts[Math.min(1, s.pts.length - 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1])/L, ny = (b[0] - a[0])/L;
         fieldText(c, 'EE', a[0] + (b[0] - a[0])/L*2.2 + nx*1.2, a[1] + (b[1] - a[1])/L*2.2 + ny*1.2, .9, '#9fe8ff', `800 20px ${FD}`); }
       if (s.style === 'pass' && !s.trimmed) drawNoTouch(c, s.pts);
       polyline(c, body); c.lineWidth = .36; c.strokeStyle = k;
       if (s.style === 'pass'){ c.setLineDash(DOTS); c.lineWidth = .42; } else c.setLineDash([]);
-      c.stroke(); arrowHead(c, s.pts, k); break;
+      c.stroke(); if (!s.nohead) arrowHead(c, s.pts, k); break;
     }
     case 'dive': drawDive(c, s, k); break;
     case 'bank': {
@@ -3053,8 +3062,8 @@ function draw3DArcs(list){
   for (const s of list){
     const [ax, ay] = s.a, [bx, by] = s.b, L = Math.hypot(bx - ax, by - ay) || 1, nx = (by - ay)/L, ny = -(bx - ax)/L;
     const bul = Math.min(L*.14, 4.5)*(1 - q3d), hz = clamp(L*.12, 2, 6)*q3d, za = (s.za || 0)*q3d, zb = (s.zb || 0)*q3d, pts = [];
-    const t0 = s.from || 0, cvL = (s.kc || 0)*L*L; /* shot curve bends the ground track */
-    for (let i = 0; i <= 32; i++){ const t = t0 + (1 - t0)*i/32, f = 4*t*(1 - t), o = bul*f + cvL*t*(1 - t); pts.push(p3(ax + (bx - ax)*t + nx*o, ay + (by - ay)*t + ny*o, za + (zb - za)*t + hz*f)); }
+    const t0 = s.from || 0, t1e = s.to || 1, cvL = (s.kc || 0)*L*L; /* shot curve bends the ground track */
+    for (let i = 0; i <= 32; i++){ const t = t0 + (t1e - t0)*i/32, f = 4*t*(1 - t), o = bul*f + cvL*t*(1 - t); pts.push(p3(ax + (bx - ax)*t + nx*o, ay + (by - ay)*t + ny*o, za + (zb - za)*t + hz*f)); }
     if (pts.some(q => q.w < 1)) continue; /* behind the over-the-shoulder camera */
     const mj = j3((ax + bx)/2, (ay + by)/2, hz), k = Math.sqrt(Math.abs(mj.a*mj.d - mj.b*mj.c));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalAlpha = s.alpha; ctx.lineCap = 'round';
@@ -3076,7 +3085,7 @@ function draw3DArcs(list){
 /* draws one frame of the board in the current view */
 function renderFrame(pos, layers, o){
   const fid = focusId();
-  if (fid && o){ const idx = anim.phase === 'move' ? anim.from : cur, tl = anim.phase === 'move' && doc.frames[anim.to] ? doc.frames[anim.to].tl : null;
+  if (fid && o){ const idx = anim.phase === 'move' ? anim.from : cur, tl = anim.phase === 'move' && doc.frames[anim.to] ? TL(doc.frames[anim.to]) : null;
     layers = focusLayers(layers, focusShapeIds(idx, fid, tl)); }
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1;
   if (!isPersp() || !glReady()){
@@ -3128,6 +3137,7 @@ const STRIDE = 2.3; /* pitch units per step */
 /* how long a step's movement takes on screen: real seconds for real-time steps; dragged-only steps move at sprint pace */
 function stepSecs(idx){
   const fb = doc.frames[idx], fa = doc.frames[idx - 1]; if (!fb) return 1.3;
+  if (timedOn()) return durOf(idx - 1);
   if (fb.tl) return fb.tl.secs || (fb.tl.dur || 1)*1.3;
   if (!fa) return 1.3; let m = 0; for (const id in fb.pos) if (fa.pos[id] && id !== 'ball') m = Math.max(m, dist(fa.pos[id], fb.pos[id]));
   if (fb.ballPass && fa.pos.ball && fb.pos.ball) m = Math.max(m, dist(fa.pos.ball, fb.pos.ball)*SPEED.sprint/SPEED.pass);
@@ -3137,9 +3147,9 @@ const moveMs = f => 1000*stepSecs(doc.frames.indexOf(f))/speed;
 /* when, in this step, each pass or shot is struck, and by whom */
 function stepKicks(fa, fb){
   const out = [];
-  if (fb.tl && tlOk(fa, fb)){
-    const bs = fb.tl.ball;
-    bs.forEach((b, i) => { if (b.k !== 'fly' || b.deflect) return; const prev = bs[i-1], id = prev && prev.k === 'with' ? prev.id : null; if (!id) return;
+  if (TL(fb) && tlOk(fa, fb)){
+    const bs = TL(fb).ball;
+    bs.forEach((b, i) => { if (b.k !== 'fly' || b.deflect || b.t0 < -1e-6) return; /* carried in from the step before: already kicked */ const prev = bs[i-1], id = prev && prev.k === 'with' ? prev.id : null; if (!id) return;
       const a = P(b.pts[0]), n = P(b.pts[Math.min(b.pts.length - 1, b.air ? 3 : 1)]);
       out.push({id, at:b.t0, dir:Math.atan2(n.y - a.y, n.x - a.x), pow:b.shot || b.strike ? 1.25 : b.air ? 1.05 : .85, air:!!b.air, pt:a}); });
     return out;
@@ -3265,6 +3275,10 @@ function tweenPos(fa, fb, t){
     const e = p.team === 'ball' ? easeOut(t) : ease(t); const path = fb.paths && fb.paths[p.id];
     out[p.id] = validPath(path, a, b) ? pointAlong([[a.x,a.y], ...path.slice(1,-1), [b.x,b.y]], e) : {x:a.x + (b.x - a.x)*e, y:a.y + (b.y - a.y)*e};
   }
+  const TT = TL(fb);
+  if (TT && TT.timed){ const o2 = {};
+    for (const p of doc.pieces){ const tr = TT.tracks[p.id], st = fa.pos[p.id] || fb.pos[p.id]; o2[p.id] = tr && tr.length ? legAt(tr, t, st) : st; }
+    const bb = tlBall(TT, fa, t); if (bb) o2.ball = bb.p; return o2; }
   if (tlOk(fa, fb)){
     for (const id in fb.tl.tracks){ const tr = fb.tl.tracks[id], l = tr[tr.length - 1];
       if (fa.pos[id] && fb.pos[id] && dist(P(tr[0].pts[0]), fa.pos[id]) < 2.4 && dist(P(l.pts[l.pts.length - 1]), fb.pos[id]) < 2.4) out[id] = legAt(tr, t, fa.pos[id]); }
@@ -3276,7 +3290,7 @@ function tweenPos(fa, fb, t){
 }
 /* a combo step still matches its frames (nobody dragged the ball since) */
 function tlOk(fa, fb){
-  const tl = fb.tl; if (!tl || !tl.tracks || !tl.ball || !fa.pos.ball || !fb.pos.ball) return false;
+  const tl = TL(fb); if (tl && tl.timed) return true; if (!tl || !tl.tracks || !tl.ball || !fa.pos.ball || !fb.pos.ball) return false;
   let v = true; if (tl.ball.length){ const s = tlBall(tl, fa, 0), e = tlBall(tl, fa, 1); v = dist(s.p, fa.pos.ball) < 2.4 && dist(e.p, fb.pos.ball) < 2.4; }
   return v;
 }
@@ -3328,6 +3342,127 @@ function sfx(kind){
   else if (kind === 'net'){ noise(ac, t, .45, .22, 700, .5); }
 }
 /* steps made before real-time playback: rebuild their timing from their arrows if the board still matches them */
+
+/* ---------- Timed steps ----------
+   Every step lasts a set time (its own `dur`, default the play's `stepSecs`). Everything moves at real game speed;
+   whatever is still going when a step's time runs out carries on into the next step (the clock never stops),
+   and that next step's own actions wait for it: a player finishes their run first, and the ball's passer,
+   receivers and the ball itself wait together for a ball that is still in the air. Saved steps are never changed. */
+const durOf = i => clamp(+((doc.frames[i] && doc.frames[i].dur) || doc.stepSecs || 1), .1, 30);
+const timedOn = () => !!(doc && doc.timed);
+let timedCache = {key:null, tls:null};
+function timedKey(){ return [doc.updated, doc.frames.length, doc.stepSecs, ...doc.frames.map(f => f.dur || '')].join('|'); }
+/* one step's natural plan, in seconds from its start */
+function baseSecs(k){
+  const fa = doc.frames[k - 1], fb = doc.frames[k] || null; /* no fb: the step after the last one, still to be added */
+  let nf = null; try { nf = buildNextFrame(doc, k - 1); } catch {}
+  const tracks = {}, ball = []; let any = false;
+  if (nf && nf.tl){ const T = nf.tl.secs || 1; any = true;
+    for (const id in nf.tl.tracks) tracks[id] = nf.tl.tracks[id].map(g => ({...g, t0:g.t0*T, t1:g.t1*T, ...(g.eeEnd != null ? {eeEnd:g.eeEnd*T} : {})}));
+    for (const b of nf.tl.ball) ball.push({...b, t0:b.t0*T, t1:b.t1*T}); }
+  /* anyone dragged to a new spot without an arrow walks there at sprint speed */
+  if (fb) for (const p of doc.pieces){ if (p.team === 'ball' || tracks[p.id]) continue; const a = fa.pos[p.id], b = fb.pos[p.id]; if (!a || !b) continue;
+    const d = dist(a, b); if (d > .3) tracks[p.id] = [{pts:[[a.x, a.y], [b.x, b.y]], t0:0, t1:d/SPEED.sprint, style:'run', lin:1, ei:1, eo:1}]; }
+  if (fb && !ball.length && fa.pos.ball && fb.pos.ball && dist(fa.pos.ball, fb.pos.ball) > .3 && !any){ const d = dist(fa.pos.ball, fb.pos.ball);
+    ball.push({k:'fly', lin:1, t0:0, t1:d/SPEED.pass, pts:[[fa.pos.ball.x, fa.pos.ball.y], [fb.pos.ball.x, fb.pos.ball.y]]}); }
+  return {tracks, ball};
+}
+function timedTLs(){
+  if (!timedOn()) return null;
+  const key = timedKey(); if (timedCache.key === key) return timedCache.tls;
+  const tls = []; let carry = {tracks:{}, ball:[], end:{}, ballEnd:0, shapes:[]}, clock = 0;
+  for (let k = 1; k <= doc.frames.length; k++){ /* the last one is the step after the end (what the last step's drawings would do) */
+    const D = durOf(k - 1), B = baseSecs(k);
+    /* the ball group (everyone who touches the ball this step, and diving keepers) waits for the slowest carried thing among them */
+    const G = new Set(); for (const b of B.ball) if (b.k === 'with') G.add(b.id);
+    for (const id in B.tracks) if (B.tracks[id].some(g => g.style === 'dive')) G.add(id);
+    const cE = id => carry.end[id] || 0;
+    const SG = Math.max(carry.ballEnd, 0, ...[...G].map(cE));
+    const tracks = {};
+    for (const id of new Set([...Object.keys(carry.tracks), ...Object.keys(B.tracks)])){
+      const sh = G.has(id) ? SG : cE(id);
+      tracks[id] = [...(carry.tracks[id] || []), ...(B.tracks[id] || []).map(g => ({...g, t0:g.t0 + sh, t1:g.t1 + sh, ...(g.eeEnd != null ? {eeEnd:g.eeEnd + sh} : {})}))];
+    }
+    const ball = [...carry.ball, ...B.ball.map(b => ({...b, t0:b.t0 + SG, t1:b.t1 + SG}))];
+    /* what spills past this step's time goes on to the next one */
+    const next = {tracks:{}, ball:[], end:{}, ballEnd:0, shapes:[]}, late = {};
+    const noteLate = (sid, t1) => { if (sid && t1 > D + 1e-3) late[sid] = Math.max(late[sid] || 0, t1 - D); };
+    for (const id in tracks){ const rest = tracks[id].filter(g => g.t1 > D + 1e-3);
+      for (const g of tracks[id]) noteLate(g.sid, g.t1);
+      if (rest.length){ next.tracks[id] = rest.map(g => ({...g, t0:g.t0 - D, t1:g.t1 - D, ...(g.eeEnd != null ? {eeEnd:g.eeEnd - D} : {})})); next.end[id] = Math.max(...rest.map(g => g.t1)) - D; } }
+    ball.forEach((b, i) => { noteLate(b.sid, b.t1);
+      const trailingHold = b.k === 'with' && i === ball.length - 1;
+      if (b.t1 > D + 1e-3 && !trailingHold){ next.ball.push({...b, t0:b.t0 - D, t1:b.t1 - D}); next.ballEnd = Math.max(next.ballEnd, b.t1 - D); } });
+    const fa = doc.frames[k - 1];
+    const sids = new Set([...Object.values(next.tracks).flat().map(g => g.sid), ...next.ball.map(b => b.sid)].filter(Boolean));
+    next.shapes = [...fa.shapes, ...carry.shapes].filter(x => sids.has(x.id));
+    const n = (t) => t/D;
+    const tl = {timed:true, secs:D, dur:D/1.3, start:clock, late, carryShapes:carry.shapes,
+      tracks:Object.fromEntries(Object.entries(tracks).map(([id, L]) => [id, L.map(g => ({...g, t0:n(g.t0), t1:n(g.t1), ...(g.eeEnd != null ? {eeEnd:n(g.eeEnd)} : {})}))])),
+      ball:ball.map(b => ({...b, t0:n(b.t0), t1:n(b.t1)}))};
+    tls[k] = tl; if (k < doc.frames.length) clock += D; carry = next;
+  }
+  tls.total = clock;
+  timedCache = {key, tls}; return tls;
+}
+/* the timeline playback reads for a step: the timed one while Timed is on */
+function TL(fb){ if (timedOn()){ const t = timedTLs(), i = doc.frames.indexOf(fb); if (t && i > 0 && t[i]) return t[i]; } return fb.tl; }
+/* where everything really is at the end of step `cur`'s clock (mid-run, ball in the air) */
+function timedPosAt(i){ if (!timedOn() || i < 1) return null; const fa = doc.frames[i - 1], fb = doc.frames[i]; return tweenPos(fa, fb, 1); }
+function trimTo(pts, f){ const L = pathLen(pts), want = L*f, out = [pts[0]]; let acc = 0;
+  for (let i = 0; i < pts.length - 1; i++){ const a = pts[i], b = pts[i+1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (acc + l >= want){ const k = l ? (want - acc)/l : 0; out.push([a[0] + (b[0] - a[0])*k, a[1] + (b[1] - a[1])*k]); return out; } out.push(b); acc += l; }
+  return out; }
+/* editing a timed step: what fits in its time is drawn normally, the rest is dimmed and says how late it lands */
+function timedLayers(idx, shapes){
+  const tls = timedTLs(); if (!tls) return null;
+  const tl = tls[idx + 1]; if (!tl) return null;
+  const prog = shapeProgress(tl, 1), keep = [], dim = [], heads = [], marks = [];
+  const lastStep = idx + 2 >= doc.frames.length; /* the spill-over would only show in a step that isn't there yet */
+  for (const sh of shapes){
+    const p = prog[sh.id], lt = tl.late[sh.id];
+    if (p == null || !lt){ keep.push(sh); continue; }
+    dim.push(sh);
+    const base = sh.type === 'bank' ? passPts(sh) : sh.type === 'arrow' ? (sh.air ? null : shotPts(sh)) : null;
+    if (sh.type === 'arrow' && sh.air){ if (p > .02) heads.push({...sh, upto:p, nohead:true}); const a = sh.pts[0], b = sh.pts[sh.pts.length - 1], kc = curveK(sh), g = kc ? curveAt(a, b, kc, p) : [a[0] + (b[0] - a[0])*p, a[1] + (b[1] - a[1])*p]; marks.push({pt:g, late:lt, last:lastStep}); continue; }
+    if (!base){ continue; }
+    if (p > .02) heads.push({type:'arrow', style:sh.type === 'bank' ? 'pass' : sh.style, shot:sh.shot, ee:sh.ee, id:sh.id, color:sh.color, trimmed:true, nohead:true, pts:trimTo(base, p)});
+    const cut = trimTo(base, Math.max(p, .001)); marks.push({pt:cut[cut.length - 1], late:lt, last:lastStep});
+  }
+  return {layers:[{shapes:keep, alpha:1}, {shapes:dim, alpha:.26}, {shapes:heads, alpha:1}], marks};
+}
+function drawTimedMarks(c, marks){
+  for (const m of marks){ const [x, y] = m.pt;
+    c.save(); c.beginPath(); c.arc(x, y, .55, 0, Math.PI*2); c.fillStyle = '#f2b33d'; c.fill(); c.lineWidth = .15; c.strokeStyle = '#11161d'; c.stroke(); c.restore();
+    fieldText(c, `+${m.late.toFixed(1)} s${m.last ? ' · add a step' : ' → next step'}`, x, y - 1.6, .9, '#f2b33d', `800 20px ${FD}`); }
+}
+/* reach rings: how far each player gets (sprint, and with Extra Effort) and how far the ball goes (pass, shot) inside this step's time */
+let reachRings = false;
+const eeDist = t => SPEED.ee*Math.min(t, SPEED.eeSecs) + SPEED.sprint*Math.max(0, t - SPEED.eeSecs);
+function drawReachRings(c, f, idx){
+  const D = durOf(idx), pos = f.pos;
+  c.save(); courtPath(c, 0); c.clip(); c.lineWidth = .16;
+  for (const p of doc.pieces){ if (p.team === 'ball' || !doc.show[p.team]) continue; const q = pos[p.id]; if (!q) continue; const k = pieceColor(p);
+    const focus = p.id === hoverId || (sel && sel === p.id); /* full detail for the player you point at; a faint sprint ring for everyone else */
+    c.setLineDash([]); c.lineWidth = focus ? .24 : .14; c.strokeStyle = rgba(k, focus ? .9 : .32); c.beginPath(); c.arc(q.x, q.y, SPEED.sprint*D, 0, Math.PI*2); c.stroke();
+    if (focus){ c.setLineDash([.6, .5]); c.strokeStyle = 'rgba(120,220,255,.8)'; c.beginPath(); c.arc(q.x, q.y, eeDist(D), 0, Math.PI*2); c.stroke();
+      fieldText(c, `RUN ${(SPEED.sprint*D).toFixed(1)} · EE ${eeDist(D).toFixed(1)}`, q.x, q.y - eeDist(D) - .9, .8, '#9fe8ff', `800 20px ${FD}`); } }
+  if (pos.ball){ const b = pos.ball; c.lineWidth = .2;
+    c.setLineDash([1, .6]); c.strokeStyle = 'rgba(255,255,255,.6)'; c.beginPath(); c.arc(b.x, b.y, SPEED.pass*D, 0, Math.PI*2); c.stroke();
+    c.setLineDash([]); c.strokeStyle = 'rgba(255,214,102,.65)'; c.beginPath(); c.arc(b.x, b.y, SPEED.shot*D, 0, Math.PI*2); c.stroke(); }
+  c.restore();
+  if (pos.ball){ const b = pos.ball;
+    fieldText(c, `PASS ${Math.round(SPEED.pass*D)}`, b.x, b.y - SPEED.pass*D - .9, .8, 'rgba(255,255,255,.85)', `800 20px ${FD}`);
+    fieldText(c, `SHOT ${Math.round(SPEED.shot*D)}`, b.x, b.y - SPEED.shot*D - .9, .8, 'rgba(255,214,102,.9)', `800 20px ${FD}`); }
+}
+/* the stopwatch during timed playback */
+function timedClock(t){
+  let el = $('#timedClock'); if (!el){ el = document.createElement('div'); el.id = 'timedClock'; $('#stage').appendChild(el); }
+  if (!timedOn() || !anim.playing){ el.hidden = true; return; }
+  const tls = timedTLs(), i = anim.phase === 'move' ? anim.to : cur, tl = tls && tls[i], s0 = tl ? tl.start : (tls && tls[cur] ? tls[cur].start + tls[cur].secs : 0);
+  const now = anim.phase === 'move' && tl ? tl.start + t*tl.secs : (cur > 0 && tls && tls[cur] ? tls[cur].start + tls[cur].secs : 0);
+  el.hidden = false; el.textContent = `${Math.floor(now/60)}:${(now % 60).toFixed(1).padStart(4, '0')}`;
+}
 function refreshTimelines(){
   for (let k = 1; k < doc.frames.length; k++){
     const fb = doc.frames[k]; if (fb.tl && fb.tl.secs) continue;
@@ -3346,7 +3481,7 @@ function startPlay(){
   if (otsActive()){ otsUpdate(frame().pos, true); applyView(); }
   syncPlayBtn(); renderTimeline(); updateCaption(); anim.raf = requestAnimationFrame(tick);
 }
-function stopPlay(){ if (!anim.playing) return; anim.playing = false; anim.kicks = []; otsLook = null; anim.phase = 'idle'; cancelAnimationFrame(anim.raf); syncPlayBtn(); renderTimeline(); updateCaption(); draw(); }
+function stopPlay(){ if (!anim.playing) return; { const tc = $('#timedClock'); if (tc) tc.hidden = true; } anim.playing = false; anim.kicks = []; otsLook = null; anim.phase = 'idle'; cancelAnimationFrame(anim.raf); syncPlayBtn(); renderTimeline(); updateCaption(); draw(); }
 function tick(now){
   if (!anim.playing) return;
   if (anim.phase === 'move'){
@@ -3397,7 +3532,8 @@ function drawTween(t){
 }
 /* combo step: passes go off one after another, each with its own kick sound and height */
 function drawTweenTL(fa, fb, t){
-  const tl = fb.tl, flies = tl.ball.filter(b => b.k === 'fly');
+  const tl = TL(fb), flies = tl.ball.filter(b => b.k === 'fly' && b.t0 >= -1e-6);
+  timedClock(t);
   while ((anim.fired | 0) < flies.length && t >= flies[anim.fired | 0].t0){ const b = flies[anim.fired | 0]; anim.fired = (anim.fired | 0) + 1; sfx(b.deflect ? 'wall' : b.shot || b.strike ? 'shot' : b.air ? 'air' : 'pass'); }
   const pos = tweenPos(fa, fb, t);
   followCam(pos);
@@ -3417,7 +3553,7 @@ function drawTweenTL(fa, fb, t){
       if (isPersp()){ const fs = flyStraight(b, e); pos.ball = {x:pos.ball.x + (fs.x - pos.ball.x)*q3d, y:pos.ball.y + (fs.y - pos.ball.y)*q3d}; ballZ = clamp(L*.12, 2, 6)*q3d*4*e*(1 - e); } }
   }
   motionNow = buildMotion(pos, performance.now(), {fly:!!(b && b.k === 'fly' && t <= b.t1), ee:fa, t, tl});
-  const prog = shapeProgress(tl, t), moving = fa.shapes.filter(s => prog[s.id] != null), still = fa.shapes.filter(s => prog[s.id] == null);
+  const prog = shapeProgress(tl, t), moving = [...fa.shapes, ...(tl.carryShapes || [])].filter(s => prog[s.id] != null), still = fa.shapes.filter(s => prog[s.id] == null);
   try { renderFrame(pos, [{shapes:eatenShapes(moving, prog), alpha:1}, {shapes:still, alpha:Math.max(0, 1 - Math.max(0, t - .8)*5)}, {shapes:fb.shapes, alpha:Math.max(0, (t - .85)/.15)}], {eeFrame:fa, keeperFrame: t < .5 ? fa : fb, ballLocked, ballLift:ballLift*(1 - (isPersp() ? q3d : 0)), ballZ}); } finally { motionNow = null; }
   if (camv && camv.ots){ drawOTSRadar(pos); drawCrosshair(); } else drawMini(pos);
 }
@@ -3439,12 +3575,16 @@ function draw(){
   syncTouchBar();
   if (doc && docMap(doc) !== mapId) applyMap(docMap(doc));
   if (!doc || anim.playing && anim.phase === 'move') return;
-  const f = frame();
-  if (otsActive()){ otsUpdate(f.pos); applyView(); } else if (camv && camv.ots) endOTS();
-  if (anim.playing && kicksLive(performance.now())) motionNow = buildMotion(f.pos, performance.now(), null);
-  let res; try { res = renderFrame(f.pos, [{shapes:f.shapes, alpha:1}], {eeFrame:anim.playing ? null : undefined, sel, draft, trails:trailInfo(), handleId, runReach: draft && draft.runner ? draft.runner : (tool === 'run' && !draft && hoverId ? hoverId : null), active: drag && drag.kind === 'piece' && drag.moved ? drag.id : null, after: (ruler || diveDraft) ? (c => { if (ruler) drawRuler(c); const ds = diveDraft && diveShapeFrom(diveDraft); if (ds) drawShape(c, ds, .85, false); }) : null}); } finally { motionNow = null; }
-  if (camv && camv.ots){ drawOTSRadar(f.pos); drawCrosshair(); } else drawMini(f.pos);
-  updateStats(f.pos, res.lanes, res.shots);
+  const f = frame(), P0 = (anim.playing && timedPosAt(cur)) || f.pos; /* timed playback pauses where things really are on the clock */
+  let tlay = !anim.playing && timedOn() ? timedLayers(cur, f.shapes) : null;
+  if (anim.playing && timedOn() && cur > 0){ const tl = TL(f); if (tl && tl.timed){ const prog = shapeProgress(tl, 1), mv = [...doc.frames[cur - 1].shapes, ...(tl.carryShapes || [])].filter(x => prog[x.id] != null && prog[x.id] < .999);
+    tlay = {layers:[{shapes:eatenShapes(mv, prog), alpha:1}, {shapes:f.shapes, alpha:1}], marks:[]}; } }
+  if (anim.playing) timedClock(1);
+  if (otsActive()){ otsUpdate(P0); applyView(); } else if (camv && camv.ots) endOTS();
+  if (anim.playing && kicksLive(performance.now())) motionNow = buildMotion(P0, performance.now(), null);
+  let res; try { res = renderFrame(P0, tlay ? tlay.layers : [{shapes:f.shapes, alpha:1}], {eeFrame:anim.playing ? null : undefined, sel, draft, trails:trailInfo(), handleId, runReach: draft && draft.runner ? draft.runner : (tool === 'run' && !draft && hoverId ? hoverId : null), active: drag && drag.kind === 'piece' && drag.moved ? drag.id : null, after: (ruler || diveDraft || tlay || (reachRings && timedOn() && !anim.playing)) ? (c => { if (reachRings && timedOn() && !anim.playing) drawReachRings(c, f, cur); if (tlay) drawTimedMarks(c, tlay.marks); if (ruler) drawRuler(c); const ds = diveDraft && diveShapeFrom(diveDraft); if (ds) drawShape(c, ds, .85, false); }) : null}); } finally { motionNow = null; }
+  if (camv && camv.ots){ drawOTSRadar(P0); drawCrosshair(); } else drawMini(P0);
+  updateStats(P0, res.lanes, res.shots);
   if (coop.on) drawCursors();
 }
 
@@ -4334,12 +4474,13 @@ function renderTimeline(){
   $('#delStep').disabled = doc.frames.length < 2;
   const box = $('#steps'), active = box.querySelector('[aria-current="true"]');
   if (active){ const a = active.getBoundingClientRect(), b = box.getBoundingClientRect(); if (a.left < b.left) box.scrollLeft -= b.left - a.left; else if (a.right > b.right) box.scrollLeft += a.right - b.right; }
+  renderTimelineTitles();
 }
 $('#steps').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (b) goStep(+b.dataset.step); });
 function goStep(i){ stopPlay(); closeFloat(true); const n = clamp(i, 0, doc.frames.length - 1); if (n === cur) return; cur = n; sel = null; syncSel(); renderTimeline(); updateCaption(); syncKeepers(); syncRunUI(); draw(); autosave(); }
 function addStep(){
   stopPlay(); snapshot();
-  const nf = buildNextFrame(doc, cur);
+  const nf = buildNextFrame(doc, cur); if (doc.frames[cur].dur) nf.dur = doc.frames[cur].dur; /* a new step keeps this step's time */
   doc.frames.splice(cur + 1, 0, nf); cur++; sel = null; commit();
   const moved = Object.keys(nf.paths).length;
   toast(nf.tl ? `Step ${cur + 1} added as a combo: chained arrows play one after another and passes meet their runner.` : moved ? `Step ${cur + 1} added. Moved ${moved} piece${moved === 1 ? '' : 's'} along their arrows.` : `Step ${cur + 1} added. Drag players to set it up.`);
@@ -4357,9 +4498,20 @@ $('#playBtn').addEventListener('click', () => anim.playing ? stopPlay() : startP
 let noteSnap = false;
 $('#note').addEventListener('focus', () => { noteSnap = false; });
 $('#note').addEventListener('input', e => { if (!noteSnap){ snapshot(); noteSnap = true; } frame().note = e.target.value; updateCaption(); autosave(); renderTimelineTitles(); });
-function renderTimelineTitles(){ document.querySelectorAll('[data-step]').forEach(b => { const f = doc.frames[+b.dataset.step]; b.title = f.note || 'Step ' + (+b.dataset.step + 1); }); }
+function renderTimelineTitles(){ const tls = timedOn() ? timedTLs() : null; let at = 0;
+  document.querySelectorAll('[data-step]').forEach(b => { const i = +b.dataset.step, f = doc.frames[i]; if (!f) return;
+    const t = tls ? ` · ${(tls[i] ? tls[i].start + tls[i].secs : 0).toFixed(1)} s, lasts ${durOf(i).toFixed(1)} s` : ''; b.title = (f.note || 'Step ' + (i + 1)) + t; });
+  syncTimedUI(); }
+function syncTimedUI(){ if (!doc) return; const on = timedOn(); $('#timedTog').checked = on; $('#timedBox').hidden = !on;
+  const inp = $('#stepDur'); if (document.activeElement !== inp) inp.value = durOf(cur).toFixed(1); $('#ringsBtn').setAttribute('aria-pressed', reachRings); }
 $('#speed').addEventListener('change', e => { speed = +e.target.value; saveSettings(); });
 $('#loop').addEventListener('change', e => { loop = e.target.checked; saveSettings(); });
+$('#timedTog').addEventListener('change', e => { stopPlay(); snapshot(); doc.timed = e.target.checked; if (doc.timed && !doc.stepSecs) doc.stepSecs = 1; commit();
+  toast(doc.timed ? `Timed steps on: each step lasts ${durOf(cur).toFixed(1)} s at real speed. Anything that doesn't fit carries on into the next step (dimmed, with how late it lands).` : 'Timed steps off.'); });
+$('#stepDur').addEventListener('change', e => { const v = clamp(Math.round((+e.target.value || 1)*10)/10, .1, 30); stopPlay(); snapshot(); frame().dur = v; if (!doc.stepSecs) doc.stepSecs = v; e.target.value = v.toFixed(1); commit(); toast(`Step ${cur + 1} lasts ${v.toFixed(1)} s.`); });
+$('#stepDur').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); e.stopPropagation(); });
+$('#ringsBtn').addEventListener('click', () => { reachRings = !reachRings; syncTimedUI(); draw();
+  if (reachRings) toast(`Reach in ${durOf(cur).toFixed(1)} s: solid ring = sprint, dashed blue = with Extra Effort; from the ball, dashed white = pass, gold = full-power shot.`); });
 $('#animMv').addEventListener('change', e => { animMoves = e.target.checked; saveSettings(); });
 $('#sound').addEventListener('change', e => { soundOn = e.target.checked; saveSettings(); if (soundOn) sfx('pass'); });
 
