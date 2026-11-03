@@ -762,6 +762,7 @@ const TOOLS = [
   {id:'bank', key:'B', name:'Wall pass', svg:'<path d="M4 5l7.5 12L19 6"/><path d="M14.5 5.5 19 6l.5 4.5"/><path d="M2.5 20.5h19" stroke-width="2.4"/>'},
   {id:'zone', key:'Z', name:'Zone', svg:'<rect x="4" y="6" width="16" height="12" rx="1.5" stroke-dasharray="3 2.2"/>'},
   {id:'circle', key:'O', name:'Circle', svg:'<circle cx="12" cy="12" r="7.5" stroke-dasharray="3 2.2"/>'},
+  {id:'lasso', key:'I', name:'Freehand zone', svg:'<path d="M6 7c3-3 9-3 12 0s2 8-2 10-9 2-11-1-1-6 1-9z" stroke-dasharray="3 2.2"/>'},
   {id:'pen', key:'F', name:'Pen', svg:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>'},
   {id:'text', key:'T', name:'Text', svg:'<path d="M5 6h14M12 6v13"/>'},
   {id:'erase', key:'E', name:'Eraser', svg:'<path d="M9 20h11"/><path d="M4.5 15.5l9-9 5.5 5.5-8 8H8.5z"/>'},
@@ -771,13 +772,14 @@ const HINTS = {
   select:'<b>Move</b> · drag players and the ball. A player on the ball carries it. Click a drawing to select it. Double-click a player to relabel.',
   run:'<b>Run</b> · draw an off-ball run starting on a player. Curves follow your stroke.',
   pass:'<b>Pass</b> · drag from the ball carrier to the target. Shift while drawing makes it aerial.',
+  lasso:'<b>Freehand zone</b> · draw round an area to shade it. Hold Shift for straight edges.',
   shot:'<b>Shot</b> · drag from the ball carrier to where it should go. Shift: aerial. Scroll or [ ] while drawing: curve. Right-click a shot to change its curve.',
   air:'<b>Aerial pass</b> · drag from the ball carrier to the target. Anyone near the passer blocks the lift. Right-click it to choose Control or Volley for the receiver.',
   dribble:'<b>Dribble</b> · draw the carry path starting on the ball carrier.',
   bank:'<b>Wall pass</b> · drag from the passer into a wall until it snaps, then keep dragging to pull the rebound out at the true angle. Reach the next wall and it carries on off the corner. Shift lofts it.',
   zone:'<b>Zone</b> · drag to shade an area.',
   circle:'<b>Circle</b> · drag outward from the center.',
-  pen:'<b>Pen</b> · freehand marks. Thickness, dotted and see-through in the bar below.',
+  pen:'<b>Pen</b> · freehand marks. Hold Shift for a straight line. Thickness, dotted and see-through in the bar below.',
   text:'<b>Text</b> · click to place a label. Size, label box and see-through in the bar below.',
   erase:'<b>Eraser</b> · click or drag over drawings to remove them.',
   ruler:'<b>Ruler</b> · drag to measure. Shows pitch units and roughly meters. Use it to calibrate pass ranges.'
@@ -827,6 +829,9 @@ function chaikin(pts, it){
   return pts;
 }
 const r2 = p => [Math.round(p[0]*100)/100, Math.round(p[1]*100)/100];
+function polyArea(pts){ let a = 0; for (let i = 0; i < pts.length; i++){ const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length]; a += x1*y2 - x2*y1; } return Math.abs(a)/2; }
+function inPoly(pts, p){ let inside = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++){ const [xi, yi] = pts[i], [xj, yj] = pts[j];
+  if ((yi > p.y) !== (yj > p.y) && p.x < (xj - xi)*(p.y - yi)/(yj - yi) + xi) inside = !inside; } return inside; }
 function processStroke(pts, keepShape){
   if (pts.length < 2 || pathLen(pts) < 1.5) return null;
   if (!keepShape){
@@ -2206,19 +2211,28 @@ function drawGrid(c){
 const ctrlCanvas = document.createElement('canvas'); ctrlCanvas.width = Math.ceil(W); ctrlCanvas.height = Math.ceil(H);
 const ctrlCtx = ctrlCanvas.getContext('2d');
 let ctrlCache = {key:'', home:.5, away:.5};
+/* Space control: who gets to each spot first, at real sprint speed (Extra Effort ready makes a player quicker over the first
+   ~15 units). Worked out on a fine grid with soft, anti-aliased edges; spots that are a close race fade towards the line. */
+const CTRL_RES = 3; /* samples per unit */
+const arriveTime = (d, ee) => { if (!ee) return d/SPEED.sprint; const de = SPEED.ee*SPEED.eeSecs; return d <= de ? d/SPEED.ee : SPEED.eeSecs + (d - de)/SPEED.sprint; };
 function computeControl(pos){
-  const pl = players();
-  const key = pl.map(p => p.id + pos[p.id].x.toFixed(2) + ',' + pos[p.id].y.toFixed(2)).join('|') + doc.teams.home.color + doc.teams.away.color;
+  const pl = players(), kf = sceneFrame || frame();
+  const key = pl.map(p => p.id + pos[p.id].x.toFixed(2) + ',' + pos[p.id].y.toFixed(2) + (hasEE(kf, p.id) ? 'e' : '')).join('|') + doc.teams.home.color + doc.teams.away.color + W + 'x' + H;
   if (key === ctrlCache.key) return ctrlCache;
-  const CW = ctrlCanvas.width, CH = ctrlCanvas.height, img = ctrlCtx.createImageData(CW, CH), data = img.data;
+  const CW = Math.ceil(W*CTRL_RES), CH = Math.ceil(H*CTRL_RES);
+  if (ctrlCanvas.width !== CW || ctrlCanvas.height !== CH){ ctrlCanvas.width = CW; ctrlCanvas.height = CH; }
+  const img = ctrlCtx.createImageData(CW, CH), data = img.data;
   const cols = {home:hexRgb(doc.teams.home.color), away:hexRgb(doc.teams.away.color)};
+  const P = pl.map(p => ({x:pos[p.id].x, y:pos[p.id].y, home:p.team === 'home', ee:hasEE(kf, p.id)}));
   let nh = 0, na = 0;
-  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++){
-    let best = null, bd = Infinity; const cx = i + .5, cy = j + .5;
-    for (const p of pl){ const q = pos[p.id], d = (q.x - cx)**2 + (q.y - cy)**2; if (d < bd){ bd = d; best = p.team; } }
-    const k = (j*CW + i)*4;
-    if (best){ const c = cols[best]; data[k] = c[0]; data[k+1] = c[1]; data[k+2] = c[2]; data[k+3] = 92; best === 'home' ? nh++ : na++; }
-  }
+  for (let j = 0; j < CH; j++){ const cy = (j + .5)/CTRL_RES;
+    for (let i = 0; i < CW; i++){ const cx = (i + .5)/CTRL_RES; let th = Infinity, ta = Infinity;
+      for (const q of P){ const dx = q.x - cx, dy = q.y - cy, t = arriveTime(Math.sqrt(dx*dx + dy*dy), q.ee); if (q.home){ if (t < th) th = t; } else if (t < ta) ta = t; }
+      if (th === Infinity && ta === Infinity) continue;
+      const m = ta - th, c = cols[m > 0 ? 'home' : 'away'], am = Math.abs(m);
+      const edge = Math.min(1, am/.03), close = .78 + .22*Math.min(1, am/.25); /* a thin clean seam on the line, slightly lighter where it's a close race */
+      const k = (j*CW + i)*4; data[k] = c[0]; data[k+1] = c[1]; data[k+2] = c[2]; data[k+3] = Math.round(110*edge*close);
+      m > 0 ? nh++ : na++; } }
   ctrlCtx.putImageData(img, 0, 0);
   const tot = nh + na || 1;
   ctrlCache = {key, home:nh/tot, away:na/tot};
@@ -2226,7 +2240,7 @@ function computeControl(pos){
 }
 function drawControl(c, pos){
   computeControl(pos);
-  c.save(); courtPath(c, 0); c.clip(); c.imageSmoothingEnabled = true; c.drawImage(ctrlCanvas, 0, 0, ctrlCanvas.width, ctrlCanvas.height); c.restore();
+  c.save(); courtPath(c, 0); c.clip(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high'; c.drawImage(ctrlCanvas, 0, 0, W, H); c.restore();
 }
 function drawRings(c, pos){
   c.save(); c.setLineDash([.8, .6]); c.lineWidth = .18;
@@ -2482,6 +2496,7 @@ function wavy(pts){
 function shapeOutline(c, s){
   switch (s.type){
     case 'rect': rr(c, s.x, s.y, s.w, s.h, 1); return true;
+    case 'lasso': polyline(c, s.pts); c.closePath(); return true;
     case 'circle': c.beginPath(); c.arc(s.cx, s.cy, s.r, 0, Math.PI*2); return true;
     case 'pen': case 'arrow': polyline(c, s.air ? airArc(s.pts[0], s.pts[s.pts.length-1], curveK(s)) : shotPts(s)); return true;
     case 'bank': polyline(c, bankOf(s).pts); return true;
@@ -2527,6 +2542,7 @@ function drawShape(c, s, alpha, selected){
   if (selected && shapeOutline(c, s)){ c.setLineDash([]); c.lineWidth = 1.5; c.strokeStyle = 'rgba(242,179,61,.38)'; c.stroke(); }
   switch (s.type){
     case 'rect': rr(c, s.x, s.y, s.w, s.h, 1); c.fillStyle = rgba(k, .16); c.fill(); c.setLineDash([1, .7]); c.lineWidth = .3; c.strokeStyle = rgba(k, .85); c.stroke(); break;
+    case 'lasso': polyline(c, s.pts); c.closePath(); c.fillStyle = rgba(k, .16); c.fill(); c.setLineDash([1, .7]); c.lineWidth = .3; c.strokeStyle = rgba(k, .85); c.stroke(); break;
     case 'circle': c.beginPath(); c.arc(s.cx, s.cy, s.r, 0, Math.PI*2); c.fillStyle = rgba(k, .16); c.fill(); c.setLineDash([1, .7]); c.lineWidth = .3; c.strokeStyle = rgba(k, .85); c.stroke(); break;
     case 'pen': { const w = penWidth(s); polyline(c, s.pts); c.lineWidth = w; c.strokeStyle = s.clear ? rgba(k, .42) : k;
       if (s.dots) c.setLineDash([.01, w*2.3 + .25]); c.stroke(); c.setLineDash([]); break; }
@@ -2767,7 +2783,7 @@ function renderScene(c, pos, layers, o = {}){
   if (ov.control) drawControl(c, pos);
   if (ov.grid) drawGrid(c);
   if (ov.callouts) drawCallouts(c, pos);
-  const isZone = s => s.type === 'rect' || s.type === 'circle';
+  const isZone = s => s.type === 'rect' || s.type === 'circle' || s.type === 'lasso';
   for (const L of layers) for (const s of L.shapes) if (isZone(s)) drawShape(c, s, L.alpha, s.id === o.sel);
   if (o.draft && isZone(o.draft)) drawShape(c, o.draft, .9, false);
   if (ov.rings) drawRings(c, pos);
@@ -3637,14 +3653,16 @@ function hitOne(s, p){
     case 'dive': return polyDist([s.a, s.t], p) < tol || dist(P(s.t), p) < tol + .4;
     case 'text': { const z = textSize(s); return Math.abs(p.x - s.x) < textWidth(s.text, z)/2 + .6 + slop(p)*.5 && Math.abs(p.y - s.y) < z*.86 + slop(p)*.5; }
     case 'rect': return p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h;
+    case 'lasso': return inPoly(s.pts, p) || polyDist([...s.pts, s.pts[0]], p) < tol;
     case 'circle': return Math.hypot(p.x - s.cx, p.y - s.cy) <= s.r;
   }
   return false;
 }
 function hitShape(p){
   const sh = frame().shapes;
-  for (let i = sh.length - 1; i >= 0; i--) if (sh[i].type !== 'rect' && sh[i].type !== 'circle' && hitOne(sh[i], p)) return sh[i];
-  for (let i = sh.length - 1; i >= 0; i--) if ((sh[i].type === 'rect' || sh[i].type === 'circle') && hitOne(sh[i], p)) return sh[i];
+  const area = t => t === 'rect' || t === 'circle' || t === 'lasso';
+  for (let i = sh.length - 1; i >= 0; i--) if (!area(sh[i].type) && hitOne(sh[i], p)) return sh[i];
+  for (let i = sh.length - 1; i >= 0; i--) if (area(sh[i].type) && hitOne(sh[i], p)) return sh[i];
   return null;
 }
 function shifted(o, dx, dy){
@@ -3775,10 +3793,11 @@ cv.addEventListener('pointerdown', e => {
   if (tool === 'erase'){ drag = {kind:'erase', snapped:false}; eraseAt(p); return; }
   if (tool === 'text'){ openFloat(p, '', {kind:'text', p}, 'Type a label, then Enter'); return; }
   if (tool === 'ruler'){ const sp = snapStart(p); ruler = {a:sp, b:sp, active:true}; draw(); return; }
-  const sp = tool === 'pen' || e.altKey ? p : snapStart(p); /* hold Alt to start exactly where you click */
+  const sp = tool === 'pen' || tool === 'lasso' || e.altKey ? p : snapStart(p); /* hold Alt to start exactly where you click */
   if (tool === 'run' || tool === 'dribble') draft = {type:'arrow', style:tool, pts:[[sp.x, sp.y]], color};
   if (tool === 'run' && draft){ const rp = runnerAt([sp.x, sp.y], f); draft.runner = rp ? rp.id : null; draft.limit = runLimit(rp, f); }
-  else if (tool === 'pen') draft = {type:'pen', pts:[[p.x, p.y]], color, ...penProps()};
+  else if (tool === 'pen') draft = {type:'pen', pts:[[p.x, p.y]], color, ...penProps(), anchor:e.shiftKey ? 0 : null};
+  else if (tool === 'lasso') draft = {type:'lasso', pts:[[p.x, p.y]], color, anchor:e.shiftKey ? 0 : null};
   else if (tool === 'shot') draft = {type:'arrow', style:'pass', shot:true, pts:[[sp.x, sp.y], [sp.x, sp.y]], color, ...(touchMods.air ? {air:true} : {})};
   else if (tool === 'pass') draft = {type:'arrow', style:'pass', pts:[[sp.x, sp.y], [sp.x, sp.y]], color, ...(touchMods.air ? {air:true, recv:touchMods.volley ? 'volley' : 'control'} : {})};
   else if (tool === 'air') draft = {type:'arrow', style:'pass', air:true, recv:touchMods.volley ? 'volley' : 'control', pts:[[sp.x, sp.y], [sp.x, sp.y]], color};
@@ -3817,7 +3836,10 @@ cv.addEventListener('pointermove', e => {
   if (ruler && ruler.active){ ruler.b = p; draw(); return; }
   if (draft){
     if (draft.type === 'arrow' && draft.style === 'pass') draft.pts[1] = [p.x, p.y];
-    else if (draft.pts){ const l = draft.pts[draft.pts.length-1];
+    else if ((draft.type === 'pen' || draft.type === 'lasso') && e.shiftKey){ /* Shift: a straight line from where Shift went down */
+      if (draft.anchor == null) draft.anchor = draft.pts.length - 1;
+      draft.pts = draft.pts.slice(0, draft.anchor + 1).concat([[p.x, p.y]]); draft.straight = true; }
+    else if (draft.pts){ if (draft.type === 'pen' || draft.type === 'lasso') draft.anchor = null; const l = draft.pts[draft.pts.length-1];
       if (Math.hypot(p.x - l[0], p.y - l[1]) > .55 && !draft.full){
         draft.pts.push([p.x, p.y]);
         if (draft.limit < Infinity && pathLen(draft.pts) >= draft.limit){ draft.pts = capPath(draft.pts, draft.limit); draft.full = true; }
@@ -3850,9 +3872,10 @@ function endPointer(){
       else toast(d.blocked ? 'A ground pass into the goal mouth goes in. Press Shift to loft it off the glass.' : 'Drag the pass all the way to a wall to bounce it.');
     }
     if (d.type === 'arrow' && d.style === 'pass'){ if (pathLen(d.pts) > 1.5){ sh = {type:'arrow', style:'pass', pts:d.pts.map(r2), color:d.color}; if (d.shot){ sh.shot = true; if (d.curve) sh.curve = d.curve; } if (d.air){ sh.air = true; sh.recv = d.recv || 'control'; } } }
-    else if (d.type === 'arrow' || d.type === 'pen'){ const pts = processStroke(d.pts, d.type === 'pen'); if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color, ...(d.ee && d.style !== 'pass' ? {ee:true} : {})}; }
+    else if (d.type === 'arrow' || d.type === 'pen'){ const pts = d.type === 'pen' && d.straight ? (pathLen(d.pts) > 1 ? rdp(d.pts, .1).map(r2) : null) : processStroke(d.pts, d.type === 'pen'); /* straight bits keep their corners */ if (pts) sh = d.type === 'pen' ? {type:'pen', pts, color:d.color, ...penProps(d)} : {type:'arrow', style:d.style, pts, color:d.color, ...(d.ee && d.style !== 'pass' ? {ee:true} : {})}; }
     else if (d.type === 'bank'){ if (Math.hypot(d.t[0] - d.a[0], d.t[1] - d.a[1]) > 2) sh = {type:'bank', a:r2(d.a), t:r2(d.t), wall:d.wall || autoWall(d.a, d.t, d.air), color:d.color}; if (d.air){ sh.air = true; sh.recv = 'control'; } }
     else if (d.type === 'rect'){ if (d.w > 1 && d.h > 1) sh = {type:'rect', x:d.x, y:d.y, w:d.w, h:d.h, color:d.color}; }
+    else if (d.type === 'lasso'){ const pts = d.straight ? rdp(d.pts, .1).map(r2) : processStroke(d.pts, true); if (pts && pts.length >= 3 && polyArea(pts) > 2) sh = {type:'lasso', pts, color:d.color}; else toast('Draw round an area to make a zone.'); }
     else if (d.type === 'circle'){ if (d.r > .8) sh = {type:'circle', cx:d.cx, cy:d.cy, r:d.r, color:d.color}; }
     if (sh && sh.type === 'arrow' && sh.style === 'run' && passCfg.runSame){
       const f = frame();
@@ -4052,7 +4075,7 @@ fe.addEventListener('blur', () => closeFloat(true));
 
 /* ---------- selection ---------- */
 function selShape(){ return sel ? frame().shapes.find(s => s.id === sel) : null; }
-const SHAPE_NAMES = {dive:'Goalkeeper jump', air:'Aerial pass', run:'Run', pass:'Pass', dribble:'Dribble', bank:'Wall pass', rect:'Zone', circle:'Circle', pen:'Pen mark', text:'Text'};
+const SHAPE_NAMES = {lasso:'Zone', dive:'Goalkeeper jump', air:'Aerial pass', run:'Run', pass:'Pass', dribble:'Dribble', bank:'Wall pass', rect:'Zone', circle:'Circle', pen:'Pen mark', text:'Text'};
 function syncSel(){
   const s = selShape(); if (!s) sel = null;
   $('#selbar').hidden = !s;
@@ -5059,7 +5082,7 @@ $('#fsBtn').addEventListener('click', () => {
 });
 
 /* ---------- keyboard ---------- */
-const KEYS = {j:'shot', v:'select', r:'run', p:'pass', d:'dribble', b:'bank', z:'zone', o:'circle', f:'pen', t:'text', e:'erase', u:'ruler'};
+const KEYS = {i:'lasso', j:'shot', v:'select', r:'run', p:'pass', d:'dribble', b:'bank', z:'zone', o:'circle', f:'pen', t:'text', e:'erase', u:'ruler'};
 document.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'){ if (e.key === 'Escape') e.target.blur(); return; }
