@@ -293,7 +293,7 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .tl-opts select{height:34px}
 #timedClock{position:absolute;left:12px;bottom:12px;z-index:5;padding:4px 10px;border-radius:8px;background:rgba(8,12,18,.78);border:1px solid var(--line);font:700 20px var(--f-mono);color:#fff;letter-spacing:.04em;pointer-events:none}
 
-.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:9px;font-weight:600;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:20;max-width:calc(100% - 32px)}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);pointer-events:none;text-align:center;background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:9px;font-weight:600;font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.45);z-index:20;max-width:calc(100% - 32px)}
 
 /* Look picker (same as the Taka Coaching Clipboard) */
 .look-fab{flex:none;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--surface-2);display:inline-flex;align-items:center;justify-content:center;padding:0;transition:transform .12s,border-color .12s}
@@ -3575,6 +3575,7 @@ function draw(){
   syncTouchBar();
   if (doc && docMap(doc) !== mapId) applyMap(docMap(doc));
   if (!doc || anim.playing && anim.phase === 'move') return;
+  if (anim.playing && timedOn() && cur > 0){ const tl = TL(frame()); if (tl && tl.timed){ timedClock(1); drawTweenTL(doc.frames[cur - 1], frame(), 1); return; } } /* paused between timed steps: exactly where the clock stopped, a lofted ball still in the air */
   const f = frame(), P0 = (anim.playing && timedPosAt(cur)) || f.pos; /* timed playback pauses where things really are on the clock */
   let tlay = !anim.playing && timedOn() ? timedLayers(cur, f.shapes) : null;
   if (anim.playing && timedOn() && cur > 0){ const tl = TL(f); if (tl && tl.timed){ const prog = shapeProgress(tl, 1), mv = [...doc.frames[cur - 1].shapes, ...(tl.carryShapes || [])].filter(x => prog[x.id] != null && prog[x.id] < .999);
@@ -5170,7 +5171,11 @@ function updateKtip(){
 document.addEventListener('keyup', () => requestAnimationFrame(updateKtip));
 /* ---------- misc ---------- */
 let toastTimer = 0;
-function toast(msg){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 2800); }
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer);
+  /* sit inside the bottom of the board, never over the step bar (notes, Timed, speed) */
+  const st = $('#stage'), r = st && st.getBoundingClientRect();
+  if (r && r.width > 0){ t.style.left = (r.left + r.width/2) + 'px'; t.style.bottom = Math.max(12, innerHeight - r.bottom + 14) + 'px'; t.style.maxWidth = Math.max(240, r.width - 32) + 'px'; }
+  toastTimer = setTimeout(() => t.hidden = true, 2800 + Math.min(4000, msg.length*22)); }
 function commit(){ requestAnimationFrame(updateKtip); doc.updated = Date.now(); autosave(); syncUndo(); renderTimeline(); syncSel(); updateCaption(); syncKeepers(); syncRunUI(); draw(); renderLibraryLite(); if (coop.on) coopPush(); }
 function renderLibraryLite(){ const li = document.querySelector(`#lib li[data-id="${doc.id}"] b`); if (li) li.textContent = doc.name; }
 function refreshAll(){ $('#playName').value = doc.name; syncTeams(); syncSwatches(); syncOverlays(); renderTimeline(); renderLibrary(); syncSel(); syncUndo(); updateCaption(); draw(); autosave(); if (coop.on) coopPush(); }
