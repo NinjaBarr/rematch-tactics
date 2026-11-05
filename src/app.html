@@ -6123,8 +6123,8 @@ try { boot(); const nj = document.getElementById('nojs'); if (nj) nj.remove();
   if ((location.protocol === 'https:' || location.hostname === 'localhost') && 'serviceWorker' in navigator && !embedded && document.querySelector('link[rel="manifest"]')) navigator.serviceWorker.register('sw.js').catch(() => {}); }
 catch (err){ const m = document.getElementById('nojsMsg'); if (m) m.textContent = 'The board hit an error while starting: ' + (err && err.message || err) + '. Try opening it in Chrome or Edge, and send this message to whoever made it.'; const ii = document.getElementById('intro'); if (ii) ii.remove(); throw err; }
 /* the opening wave (starts as the intro fades, or straight away if there's no intro) */
-const WAVE_PREVIEW = true; /* preview build only: a switcher to replay and compare the versions */
-let waveVariant = 'd';
+const WAVE_PREVIEW = false; /* true shows a switcher to replay and compare the wave versions (B/C/D kept on the wave-preview branch history) */
+let waveVariant = 'a'; /* the opening wave that shipped: A · Drop */
 function uiWave(){
   const root = document.documentElement; if (root.dataset.waved) return; root.dataset.waved = '1';
   root.classList.toggle('wave-b', waveVariant === 'b');
