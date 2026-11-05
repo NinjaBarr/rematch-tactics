@@ -892,7 +892,7 @@ const HINTS = {
   text:'<b>Text</b> · click to place a label. Size, label box and see-through in the bar below.',
   erase:'<b>Eraser</b> · click or drag over drawings to remove them.',
   ruler:'<b>Ruler</b> · drag to measure (Shift snaps to 15°). Drag an end to swing it round the other end, Shift-drag an end to stretch it, drag the middle to move it. Esc clears.',
-  protractor:'<b>Protractor</b> · drag the first arm from the corner, then move and click to place the second. Drag the corner to move it, an arm end to swing it. Esc clears.'
+  protractor:'<b>Protractor</b> · drag the first arm from the corner, then click to place the second. Drag the yellow arc to spin it, the corner to reshape the angle, an arm end to swing it, a line to move it. Corner on the ball carrier: shows how much defenders block. Esc clears.'
 };
 
 /* ---------- helpers ---------- */
@@ -4220,8 +4220,11 @@ const snap15 = (o, p, on) => { if (!on) return p; const d = dist(o, p), a = Math
 function measHit(p){
   const r = ruler, t = 1.1 + slop(p)*.6; if (!r) return null;
   if (r.kind === 'ruler'){ if (dist(p, r.a) < t) return 'a'; if (dist(p, r.b) < t) return 'b'; if (segDist(p, r.a, r.b).d < .9 + slop(p)*.4) return 'body'; return null; }
-  if (dist(p, r.v) < t) return 'v'; if (r.a && dist(p, r.a) < t) return 'a'; if (r.b && dist(p, r.b) < t) return 'b';
-  if ((r.a && segDist(p, r.v, r.a).d < .8) || (r.b && segDist(p, r.v, r.b).d < .8)) return 'v';
+  if (dist(p, r.v) < t*.85) return 'v'; if (r.a && dist(p, r.a) < t) return 'a'; if (r.b && dist(p, r.b) < t) return 'b';
+  if (r.a && r.b){ const w = angWedge(r), d = dist(p, r.v); /* the yellow arc: spin both arms round the corner */
+    if (w && d < w.R + 1 + slop(p)*.4){ let q = Math.atan2(p.y - r.v.y, p.x - r.v.x) - w.t1; while (q > Math.PI) q -= 2*Math.PI; while (q < -Math.PI) q += 2*Math.PI;
+      const inside = w.dd >= 0 ? q >= -.2 && q <= w.dd + .2 : q <= .2 && q >= w.dd - .2; if (inside) return 'spin'; } }
+  if ((r.a && segDist(p, r.v, r.a).d < .8) || (r.b && segDist(p, r.v, r.b).d < .8)) return 'body';
   return null;
 }
 function measDown(p, e){
@@ -4229,7 +4232,9 @@ function measDown(p, e){
   if (ruler && ruler.mode === 'arm2'){ ruler.b = snap15(ruler.v, p, e.shiftKey); ruler.mode = null; ruler.active = false; return; } /* the click that places the second arm */
   const h = ruler && ruler.kind === kind ? measHit(p) : null;
   if (h){ const r = ruler; r.active = true; r.free = e.shiftKey;
-    if (h === 'body' || h === 'v'){ r.mode = 'move'; r.grab = {p, a:{...r.a}, b:r.b && {...r.b}, v:r.v && {...r.v}}; }
+    if (h === 'body'){ r.mode = 'move'; r.grab = {p, a:{...r.a}, b:r.b && {...r.b}, v:r.v && {...r.v}}; }
+    else if (h === 'v' && kind === 'angle'){ r.mode = 'vert'; } /* move the corner only; both arm ends stay put */
+    else if (h === 'spin'){ r.mode = 'spin'; r.grab = {ang:Math.atan2(p.y - r.v.y, p.x - r.v.x), a:{...r.a}, b:{...r.b}}; }
     else { r.mode = 'end'; r.end = h; const o = kind === 'ruler' ? (h === 'a' ? r.b : r.a) : r.v; r.len = dist(o, r[h]); }
     return; }
   const sp = snapStart(p);
@@ -4240,6 +4245,10 @@ function measMove(p, e){
   if (r.mode === 'draw') r.b = snap15(r.a, p, e.shiftKey);
   else if (r.mode === 'arm1') r.a = snap15(r.v, p, e.shiftKey);
   else if (r.mode === 'arm2') r.b = snap15(r.v, p, e.shiftKey);
+  else if (r.mode === 'vert'){ const pos = frame().pos; let best = p, bd = 1.2; /* settles onto a player or the ball when close */
+    for (const pc of doc.pieces){ const q = pos[pc.id]; if (q && dist(q, p) < bd){ bd = dist(q, p); best = {x:q.x, y:q.y}; } } r.v = best; }
+  else if (r.mode === 'spin'){ const g = r.grab, da = Math.atan2(p.y - r.v.y, p.x - r.v.x) - g.ang, c = Math.cos(da), sn = Math.sin(da);
+    const rot = q => ({x:r.v.x + (q.x - r.v.x)*c - (q.y - r.v.y)*sn, y:r.v.y + (q.x - r.v.x)*sn + (q.y - r.v.y)*c}); r.a = rot(g.a); r.b = rot(g.b); }
   else if (r.mode === 'move'){ const g = r.grab, dx = p.x - g.p.x, dy = p.y - g.p.y, sh = q => q && {x:q.x + dx, y:q.y + dy}; r.a = sh(g.a); if (g.b) r.b = sh(g.b); if (g.v) r.v = sh(g.v); }
   else if (r.mode === 'end'){ const o = r.kind === 'ruler' ? (r.end === 'a' ? r.b : r.a) : r.v;
     if (r.free || e.shiftKey) r[r.end] = p; /* Shift: stretch */
@@ -4250,6 +4259,24 @@ function measUp(){
   if (r.mode === 'draw' && dist(r.a, r.b) < .3){ ruler = null; return; }
   if (r.mode === 'arm1'){ if (dist(r.v, r.a) < .5){ ruler = null; return; } r.mode = 'arm2'; r.b = {...r.a}; toast('Now move to place the second arm and click.'); return; }
   r.mode = null;
+}
+function angWedge(r){
+  const {v, a, b} = r; if (!a || !b || dist(v, a) < .3 || dist(v, b) < .3) return null;
+  const t1 = Math.atan2(a.y - v.y, a.x - v.x), t2 = Math.atan2(b.y - v.y, b.x - v.x); let dd = t2 - t1; while (dd > Math.PI) dd -= 2*Math.PI; while (dd < -Math.PI) dd += 2*Math.PI;
+  return {t1, dd, R:Math.min(4, dist(v, a)*.45, dist(v, b)*.45)};
+}
+/* corner on the ball carrier: how much of the angle opposing bodies cover (same body widths as the shot window), out to the longer arm */
+function angBlock(r, w){
+  const pos = frame().pos, sf = frame(), cid = carrierOf(pos); if (!cid || dist(pos[cid], r.v) > 1.6) return null;
+  const me = piece(cid), reach = Math.max(dist(r.v, r.a), dist(r.v, r.b)) + PR, lo = Math.min(0, w.dd), hi = Math.max(0, w.dd), iv = [];
+  for (const o of players()){ if (o.team === me.team) continue; const q = pos[o.id], d = dist(r.v, q); if (d < .5 || d > reach) continue;
+    const u = {x:(q.x - r.v.x)/d, y:(q.y - r.v.y)/d}, half = Math.asin(Math.min(1, (blockR(o, pos, sf, {x:-u.y, y:u.x}) + BR)/d));
+    let mid = Math.atan2(u.y, u.x) - w.t1; while (mid > Math.PI) mid -= 2*Math.PI; while (mid < -Math.PI) mid += 2*Math.PI;
+    const s0 = Math.max(lo, mid - half), s1 = Math.min(hi, mid + half); if (s1 > s0) iv.push([s0, s1]); }
+  iv.sort((x, y) => x[0] - y[0]); const merged = [];
+  for (const [x0, x1] of iv){ const m = merged[merged.length - 1]; if (m && x0 <= m[1]) m[1] = Math.max(m[1], x1); else merged.push([x0, x1]); }
+  const blocked = merged.reduce((t, [x0, x1]) => t + x1 - x0, 0);
+  return {merged, blocked, total:hi - lo, lo, hi};
 }
 function drawRuler(c){
   const r = ruler; c.save(); c.lineCap = 'round';
@@ -4268,13 +4295,18 @@ function drawRuler(c){
   } else {
     const {v, a} = r, b = r.b;
     if (a && dist(v, a) > .05) seg(v, a); if (b && dist(v, b) > .05) seg(v, b);
-    if (a && b && dist(v, a) > .3 && dist(v, b) > .3){
-      const t1 = Math.atan2(a.y - v.y, a.x - v.x), t2 = Math.atan2(b.y - v.y, b.x - v.x); let dd = t2 - t1; while (dd > Math.PI) dd -= 2*Math.PI; while (dd < -Math.PI) dd += 2*Math.PI;
-      const R = Math.min(4, dist(v, a)*.45, dist(v, b)*.45);
+    const w = a && b ? angWedge(r) : null, blk = w ? angBlock(r, w) : null;
+    if (blk){ /* open (green) and blocked (red) parts of the angle, out to the shorter arm */
+      const Rv = Math.min(dist(v, a), dist(v, b)), sec = (s0, s1, col) => { c.beginPath(); c.moveTo(v.x, v.y); c.arc(v.x, v.y, Rv, w.t1 + s0, w.t1 + s1); c.closePath(); c.fillStyle = col; c.fill(); };
+      sec(blk.lo, blk.hi, 'rgba(79,209,139,.16)'); for (const [s0, s1] of blk.merged) sec(s0, s1, 'rgba(255,93,93,.32)'); }
+    if (w){
+      const {t1, dd, R} = w;
       c.beginPath(); c.moveTo(v.x, v.y); c.arc(v.x, v.y, R, t1, t1 + dd, dd < 0); c.closePath(); c.fillStyle = 'rgba(242,179,61,.22)'; c.fill();
       c.beginPath(); c.arc(v.x, v.y, R, t1, t1 + dd, dd < 0); c.lineWidth = .2; c.strokeStyle = '#f2b33d'; c.stroke();
       const mid = t1 + dd/2, deg = Math.abs(dd)*180/Math.PI;
       fieldText(c, `${deg.toFixed(deg < 10 ? 1 : 0)}°`, v.x + Math.cos(mid)*(R + 1.8), v.y + Math.sin(mid)*(R + 1.8), 1.25, '#f2b33d', `800 20px ${FD}`);
+      if (blk){ const bd = blk.blocked*180/Math.PI, od = (blk.total - blk.blocked)*180/Math.PI, pct = blk.total ? Math.round(blk.blocked/blk.total*100) : 0;
+        fieldText(c, bd < .05 ? 'Nobody blocking · all open' : `Blocked ${bd.toFixed(bd < 10 ? 1 : 0)}° (${pct}%) · ${od.toFixed(od < 10 ? 1 : 0)}° open`, v.x + Math.cos(mid)*Math.max(R + 8, 12), v.y + Math.sin(mid)*Math.max(R + 8, 12), 1, bd < .05 ? '#4fd18b' : '#ff8a8a', `800 20px ${FD}`, false, 'center', 'rgba(10,14,20,.86)'); }
       for (const q of [a, b]) fieldText(c, `${dist(v, q).toFixed(1)}`, (v.x + q.x)/2 + (q.y - v.y)/dist(v, q)*1.1, (v.y + q.y)/2 - (q.x - v.x)/dist(v, q)*1.1, .8, 'rgba(255,255,255,.85)');
     }
     if (handles){ dot(v); if (a) dot(a); if (b) dot(b); }
