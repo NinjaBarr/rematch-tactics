@@ -293,6 +293,8 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .tl-opts select{height:34px}
 .opt-back{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}
 .opt-back[hidden]{display:none}
+.gif-dlg{width:min(520px,100%)} .gif-go{display:flex;align-items:center;gap:12px;justify-content:flex-end;padding-top:14px} .gif-go .opt-note{flex:1}
+.gif-bar{flex:1;height:8px;border-radius:5px;background:var(--line);overflow:hidden} .gif-bar[hidden]{display:none} #gifBar{height:100%;width:0;background:var(--accent);transition:width .15s}
 .opt{width:min(780px,100%);max-height:min(660px,100%);display:flex;flex-direction:column;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.55);overflow:hidden}
 .opt-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 12px 20px;border-bottom:1px solid var(--line)}
 .opt-head h2{margin:0;font:700 14px var(--f-display);letter-spacing:.14em;text-transform:uppercase}
@@ -692,6 +694,7 @@ body.clean .touchbar{display:none}
         <div class="row">
           <button class="btn" id="copyImgBtn" title="Copy the board as an image to paste into Discord">Copy image</button>
           <button class="btn" id="pngBtn">Export PNG</button>
+          <button class="btn" id="gifBtn" title="Record the whole play as an animated GIF">Export GIF</button>
           <button class="btn" id="jsonBtn" title="Save this play as a file you can send to someone">Export play file</button>
         </div>
       </section>
@@ -726,6 +729,21 @@ body.clean .touchbar{display:none}
   <div class="row"><a class="btn primary" id="venmoLink" href="https://venmo.com/u/Joseph-Barr-662" target="_blank" rel="noopener">Open Venmo · @Joseph-Barr-662</a></div>
 </div>
 <div class="look-pop coop-pop" id="coopPop" role="dialog" aria-label="Co-op" hidden></div>
+<div class="opt-back" id="gifBack" hidden>
+  <div class="opt gif-dlg" role="dialog" aria-modal="true" aria-labelledby="gifTitle">
+    <div class="opt-head"><h2 id="gifTitle">Export GIF</h2><button class="btn icon" id="gifClose" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="opt-panes">
+      <p class="opt-note" style="margin:10px 0 4px">Records the whole play from step 1 in the view you're in now — flat, 3D or over-the-shoulder — at the playback speed you've set.</p>
+      <div class="opt-row"><span>Size<small>Width of the GIF</small></span><select class="field" id="gifSize" style="height:32px"><option value="480">Small · 480 px</option><option value="720" selected>Medium · 720 px</option><option value="960">Large · 960 px</option></select></div>
+      <div class="opt-row"><span>Smoothness<small>More frames look smoother but make a bigger file</small></span><select class="field" id="gifFps" style="height:32px"><option value="10">10 fps · smallest</option><option value="20" selected>20 fps</option><option value="25">25 fps · smoothest</option></select></div>
+      <label class="opt-row"><span>Pause between steps<small>Hold briefly on each step, like playback</small></span><input type="checkbox" id="gifHolds" checked></label>
+      <label class="opt-row"><span>Step bar<small>Step number and coaching note under the board</small></span><input type="checkbox" id="gifNotes" checked></label>
+      <label class="opt-row"><span>Wing-Board tag<small>A small name in the corner</small></span><input type="checkbox" id="gifTag" checked></label>
+      <label class="opt-row"><span>Loop forever</span><input type="checkbox" id="gifLoop" checked></label>
+      <div class="gif-go"><div class="gif-bar" id="gifBarWrap" hidden><div id="gifBar"></div></div><span id="gifMsg" class="opt-note" style="margin:0"></span><button class="btn primary" id="gifGo">Record GIF</button></div>
+    </div>
+  </div>
+</div>
 <div class="opt-back" id="optBack" hidden>
   <div class="opt" role="dialog" aria-modal="true" aria-labelledby="optTitle">
     <div class="opt-head"><h2 id="optTitle">Options</h2><button class="btn icon" id="optClose" aria-label="Close options" title="Close (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
@@ -5166,6 +5184,150 @@ function exportCanvas(){
   }
   return c2;
 }
+/* ---------- Export GIF ----------
+   The play is replayed on a virtual clock, one frame at a time (smooth on any PC, and faster than real time), and encoded
+   right here: median-cut palette, then only the pixels that changed since the last frame, LZW-packed. Two passes: the first
+   samples colours for the palette, the second records — the replay is deterministic, so both see the same frames. */
+const GIF_TI = 255; /* transparent index: "same as last frame" */
+function gifPalette(samples){
+  /* median cut down to 255 boxes */
+  let boxes = [samples];
+  while (boxes.length < 255){
+    let bi = -1, br = -1, bc = 0;
+    boxes.forEach((b, i) => { if (b.length < 2) return; for (let c = 0; c < 3; c++){ let lo = 255, hi = 0; for (let j = c; j < b.length; j += 3*Math.max(1, Math.floor(b.length/3/400))){ const v = b[j - (j % 3) + c]; if (v < lo) lo = v; if (v > hi) hi = v; } if (hi - lo > br){ br = hi - lo; bi = i; bc = c; } } });
+    if (bi < 0 || br <= 0) break;
+    const b = boxes[bi], n = b.length/3, idx = new Uint32Array(n); for (let i = 0; i < n; i++) idx[i] = i;
+    idx.sort((p, q) => b[p*3 + bc] - b[q*3 + bc]);
+    const h = n >> 1, A = new Uint8Array(h*3), B = new Uint8Array((n - h)*3);
+    for (let i = 0; i < n; i++){ const t = i < h ? A : B, o = (i < h ? i : i - h)*3, s = idx[i]*3; t[o] = b[s]; t[o+1] = b[s+1]; t[o+2] = b[s+2]; }
+    boxes.splice(bi, 1, A, B);
+  }
+  const pal = new Uint8Array(256*3);
+  boxes.forEach((b, i) => { let r = 0, g = 0, bl = 0; const n = b.length/3 || 1; for (let j = 0; j < b.length; j += 3){ r += b[j]; g += b[j+1]; bl += b[j+2]; } pal[i*3] = r/n; pal[i*3+1] = g/n; pal[i*3+2] = bl/n; });
+  return {pal, n:boxes.length};
+}
+function gifMapper(P){
+  const cache = new Int16Array(32768).fill(-1);
+  return (r, g, b) => { const k = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3); let v = cache[k];
+    if (v < 0){ let bd = 1e9; const R = (r & 248) + 4, G = (g & 248) + 4, B = (b & 248) + 4;
+      for (let i = 0; i < P.n; i++){ const dr = P.pal[i*3] - R, dg = P.pal[i*3+1] - G, db = P.pal[i*3+2] - B, d = dr*dr*.3 + dg*dg*.59 + db*db*.11; if (d < bd){ bd = d; v = i; } }
+      cache[k] = v; }
+    return v; };
+}
+function gifLZW(px){
+  const out = [], min = 8, clear = 1 << min, eoi = clear + 1; let size = min + 1, next = eoi + 1, cur = 0, nb = 0, clr = false;
+  const dict = new Map();
+  const emit = c => { cur |= c << nb; nb += size; while (nb >= 8){ out.push(cur & 255); cur >>>= 8; nb -= 8; }
+    if (clr){ size = min + 1; clr = false; } else if (next > (1 << size) - 1 && size < 12) size++; };
+  emit(clear);
+  let ent = px[0];
+  for (let i = 1; i < px.length; i++){ const c = px[i], key = ent*256 + c, f = dict.get(key);
+    if (f !== undefined){ ent = f; continue; }
+    emit(ent); ent = c;
+    if (next < 4096) dict.set(key, next++); else { dict.clear(); next = eoi + 1; clr = true; emit(clear); } }
+  emit(ent); emit(eoi); if (nb > 0) out.push(cur & 255);
+  return out;
+}
+function gifWriter(w, h, P, loopForever){
+  const parts = [], u16 = v => [v & 255, (v >> 8) & 255];
+  parts.push(new Uint8Array([...[...'GIF89a'].map(c => c.charCodeAt(0)), ...u16(w), ...u16(h), 0xF7, 0, 0]));
+  parts.push(P.pal);
+  if (loopForever) parts.push(new Uint8Array([0x21, 0xFF, 0x0B, ...[...'NETSCAPE2.0'].map(c => c.charCodeAt(0)), 0x03, 0x01, 0, 0, 0x00]));
+  return {
+    frame(x, y, fw, fh, px, delay){
+      parts.push(new Uint8Array([0x21, 0xF9, 0x04, (1 << 2) | 1, ...u16(delay), GIF_TI, 0x00, 0x2C, ...u16(x), ...u16(y), ...u16(fw), ...u16(fh), 0x00, 8]));
+      const d = gifLZW(px), blk = []; for (let i = 0; i < d.length; i += 255){ const s = d.slice(i, i + 255); blk.push(s.length, ...s); } blk.push(0);
+      parts.push(new Uint8Array(blk)); },
+    done(){ parts.push(new Uint8Array([0x3B])); return new Blob(parts, {type:'image/gif'}); }
+  };
+}
+/* one frame of what's on screen: the 3D turf layer, the board, and a slim caption bar */
+function gifCompose(oc, o){
+  const c = oc.getContext('2d', {willReadFrequently:true}), bw = oc.width, bh = o.bh;
+  c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#0a0f15'; c.fillRect(0, 0, oc.width, oc.height);
+  if (glc.style.visibility === 'visible') c.drawImage(glc, 0, 0, bw, bh);
+  c.drawImage(cv, 0, 0, bw, bh);
+  const tc = $('#timedClock'); const s = bw/720;
+  if (tc && !tc.hidden){ c.font = `700 ${Math.round(18*s)}px ${FM}`; const tw = c.measureText(tc.textContent).width + 16*s;
+    c.fillStyle = 'rgba(8,12,18,.8)'; rr(c, 10*s, bh - 40*s, tw, 30*s, 7*s); c.fill(); c.fillStyle = '#fff'; c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillText(tc.textContent, 18*s, bh - 25*s); }
+  if (o.capH){ const y0 = bh, f = doc.frames[cur] || frame();
+    c.fillStyle = '#151c27'; c.fillRect(0, y0, bw, o.capH); c.textBaseline = 'middle';
+    c.font = `700 ${Math.round(15*s)}px ${FD}`; c.fillStyle = '#f2b33d'; c.textAlign = 'left'; const stp = `STEP ${cur + 1}/${doc.frames.length}`; c.fillText(stp, 14*s, y0 + o.capH/2);
+    const x1 = 14*s + c.measureText(stp).width + 12*s;
+    c.font = `500 ${Math.round(15*s)}px 'Barlow',system-ui,sans-serif`; c.fillStyle = '#e8edf4';
+    let t = (o.notes && f.note) || doc.name || ''; const room = bw - x1 - (o.tag ? 110*s : 14*s); while (t && c.measureText(t).width > room) t = t.slice(0, -2); c.fillText(t, x1, y0 + o.capH/2);
+    if (o.tag){ c.font = `700 ${Math.round(13*s)}px ${FD}`; c.fillStyle = 'rgba(232,237,244,.55)'; c.textAlign = 'right'; c.fillText('WING-BOARD', bw - 14*s, y0 + o.capH/2); } }
+  else if (o.tag){ c.font = `700 ${Math.round(12*s)}px ${FD}`; c.fillStyle = 'rgba(255,255,255,.55)'; c.textAlign = 'right'; c.textBaseline = 'bottom'; c.fillText('WING-BOARD', bw - 10*s, bh - 8*s); }
+  return c.getImageData(0, 0, oc.width, oc.height).data;
+}
+/* replay the play on a virtual clock; call onFrame(rgba) for every frame that should be in the GIF */
+async function gifReplay(o, onFrame, prog){
+  const real = {now:performance.now, raf:window.requestAnimationFrame, caf:window.cancelAnimationFrame}, keep = {loop, soundOn, cur};
+  let vt = real.now.call(performance), q = [];
+  performance.now = () => vt; window.requestAnimationFrame = cb => { q.push(cb); return q.length; }; window.cancelAnimationFrame = () => {};
+  loop = false; soundOn = false;
+  try {
+    cur = 0; sel = null; hoverId = null; draft = null; draw();
+    startPlay(); const dt = 1000/o.fps; let n = 0, guard = 0;
+    while (anim.playing && guard++ < o.fps*180){
+      vt += dt; const run = q; q = []; for (const cb of run){ try { cb(vt); } catch {} }
+      const hold = anim.phase !== 'move';
+      if (o.holds || !hold || n === 0 || !anim.playing) { await onFrame(); n++; }
+      if (guard % 6 === 0){ prog && prog(guard); await new Promise(r => setTimeout(r, 0)); }
+    }
+    await onFrame(true);
+  } finally {
+    performance.now = real.now; window.requestAnimationFrame = real.raf; window.cancelAnimationFrame = real.caf;
+    loop = keep.loop; soundOn = keep.soundOn; stopPlay(); cur = keep.cur; renderTimeline(); updateCaption(); draw();
+  }
+}
+async function exportGif(o, prog){
+  const bw = o.w, bh = Math.round(bw*base.h/base.w), capH = o.notes || o.tag ? Math.round(34*bw/720) : 0;
+  const oc = document.createElement('canvas'); oc.width = bw; oc.height = bh + capH; const W2 = oc.width, H2 = oc.height, N = W2*H2;
+  const total = Math.max(1, Math.round((doc.frames.slice(0, -1).reduce((t, f, i) => t + stepSecs(i + 1), 0)/speed + (o.holds ? doc.frames.length*.75/speed : .5))*o.fps));
+  /* pass 1: sample colours */
+  const samp = []; let fi = 0;
+  await gifReplay(o, async () => { if (fi++ % 5) return; const d = gifCompose(oc, {...o, bh, capH}); for (let i = (fi*7) % 23; i < N; i += 23){ samp.push(d[i*4], d[i*4+1], d[i*4+2]); } },
+    g => prog && prog(.35*Math.min(1, g/total), 'Reading colours…'));
+  const P = gifPalette(new Uint8Array(samp)), map = gifMapper(P);
+  /* pass 2: record */
+  const gw = gifWriter(W2, H2, P, o.loop), cs = 100/o.fps; let prev = null, pend = null, acc = 0, frames = 0;
+  const flush = () => { if (pend){ gw.frame(pend.x, pend.y, pend.w, pend.h, pend.px, pend.d); pend = null; } };
+  const delayNow = () => { acc += cs; const d = Math.round(acc); acc -= d; return Math.max(2, d); };
+  await gifReplay(o, async last => {
+    const d = gifCompose(oc, {...o, bh, capH}), idx = new Uint8Array(N);
+    for (let i = 0, j = 0; i < N; i++, j += 4) idx[i] = map(d[j], d[j+1], d[j+2]);
+    let x0 = W2, y0 = H2, x1 = -1, y1 = -1;
+    if (prev){ for (let y = 0; y < H2; y++){ const r = y*W2; for (let x = 0; x < W2; x++) if (idx[r + x] !== prev[r + x]){ if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } } }
+    else { x0 = 0; y0 = 0; x1 = W2 - 1; y1 = H2 - 1; }
+    const dl = delayNow() + (last ? 150 : 0);
+    if (x1 < 0){ if (pend) pend.d += dl; return; } /* nothing moved: just hold the last frame longer */
+    flush(); const fw = x1 - x0 + 1, fh = y1 - y0 + 1, px = new Uint8Array(fw*fh);
+    for (let y = 0; y < fh; y++){ const r = (y + y0)*W2 + x0, o2 = y*fw; for (let x = 0; x < fw; x++){ const v = idx[r + x]; px[o2 + x] = prev && v === prev[r + x] ? GIF_TI : v; } }
+    pend = {x:x0, y:y0, w:fw, h:fh, px, d:dl}; prev = idx; frames++;
+  }, g => prog && prog(.35 + .65*Math.min(1, g/total), 'Recording…'));
+  flush();
+  return gw.done();
+}
+
+let gifBusy = false;
+$('#gifBtn').addEventListener('click', () => { if (doc.frames.length < 2){ toast('Add a second step first — a GIF needs something to play.'); return; } $('#gifMsg').textContent = ''; $('#gifBarWrap').hidden = true; $('#gifGo').disabled = false; $('#gifBack').hidden = false; });
+const gifClose = () => { if (!gifBusy) $('#gifBack').hidden = true; };
+$('#gifClose').addEventListener('click', gifClose);
+$('#gifBack').addEventListener('pointerdown', e => { if (e.target === e.currentTarget) gifClose(); });
+document.addEventListener('keydown', e => { if (!$('#gifBack').hidden){ if (e.key === 'Escape') gifClose(); if (!/INPUT|SELECT/.test(e.target.tagName)) e.stopImmediatePropagation(); } }, true);
+$('#gifGo').addEventListener('click', async () => {
+  if (gifBusy) return; gifBusy = true; const go = $('#gifGo'); go.disabled = true; $('#gifBarWrap').hidden = false;
+  const o = {w:+$('#gifSize').value, fps:+$('#gifFps').value, holds:$('#gifHolds').checked, notes:$('#gifNotes').checked, tag:$('#gifTag').checked, loop:$('#gifLoop').checked};
+  const t0 = Date.now();
+  try {
+    const blob = await exportGif(o, (f, msg) => { $('#gifBar').style.width = Math.round(f*100) + '%'; $('#gifMsg').textContent = msg; });
+    $('#gifBar').style.width = '100%'; const mb = blob.size/1048576;
+    $('#gifMsg').textContent = `Done · ${mb < 1 ? Math.round(blob.size/1024) + ' KB' : mb.toFixed(1) + ' MB'} · ${((Date.now() - t0)/1000).toFixed(0)} s` + (mb > 10 ? ' — over Discord\'s 10 MB limit, try Small or 10 fps' : '');
+    await download(blob, `${slug(doc.name || 'play')}.gif`);
+  } catch (err){ $('#gifMsg').textContent = 'Something went wrong recording the GIF.'; console.error(err); }
+  finally { gifBusy = false; go.disabled = false; go.textContent = 'Record again'; }
+});
 $('#pngBtn').addEventListener('click', () => exportCanvas().toBlob(b => b && download(b, `${slug(doc.name)}-step-${cur + 1}.png`), 'image/png'));
 $('#copyImgBtn').addEventListener('click', async () => {
   try {
