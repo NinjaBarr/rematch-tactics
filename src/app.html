@@ -117,6 +117,7 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 #followWrap select{appearance:none;-webkit-appearance:none;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;max-width:170px;padding:0 14px 0 0;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 6px) 55%,calc(100% - 2px) 55%;background-size:4px 4px;background-repeat:no-repeat}
 #otsBtn[aria-pressed="true"],#otsBtn.dimmed[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #otsBtn.dimmed{opacity:.55}
+#linesBtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #focusBtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #focusBtn.dimmed{opacity:.55}
 #followWrap select option{color:#111;background:#fff;text-transform:none}
@@ -579,6 +580,7 @@ body.clean .touchbar{display:none}
         <button class="btn icon" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button>
         <label class="btn follow" id="followWrap" title="Keep the camera on the ball or one player during playback (` ball, 1–5 home, 6–0 away; K ball on/off)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg><select id="zoomFollow" aria-label="Camera follows"><option value="">Follow: off</option><option value="ball">Follow ball</option></select></label>
         <button class="btn icon" id="focusBtn" aria-pressed="false" title="Focus: dim everyone else while you follow a player" aria-label="Focus on the followed player"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button class="btn icon" id="linesBtn" aria-pressed="false" title="Hide lines: show just the positions (Shift+H)" aria-label="Hide lines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 17L17 5M13 5h4v4"/><path d="M3 21L21 3" stroke-width="1.6" opacity=".9"/></svg></button>
         <button class="btn icon" id="otsBtn" aria-pressed="false" title="Over-the-shoulder: during playback the camera rides behind the followed player, like in game" aria-label="Over-the-shoulder camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 6.5a7 7 0 0 0 0 11"/><path d="M16.5 6.5a7 7 0 0 1 0 11"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg></button>
       </div>
       <div class="touchbar" id="touchbar" role="toolbar" aria-label="Drawing options" hidden></div>
@@ -849,7 +851,8 @@ const TOOLS = [
   {id:'pen', key:'F', name:'Pen', svg:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>'},
   {id:'text', key:'T', name:'Text', svg:'<path d="M5 6h14M12 6v13"/>'},
   {id:'erase', key:'E', name:'Eraser', svg:'<path d="M9 20h11"/><path d="M4.5 15.5l9-9 5.5 5.5-8 8H8.5z"/>'},
-  {id:'ruler', key:'U', name:'Ruler', svg:'<path d="M3 16 16 3l5 5L8 21z"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2"/>'}
+  {id:'ruler', key:'U', name:'Ruler', svg:'<path d="M3 16 16 3l5 5L8 21z"/><path d="M7 12l2 2M10 9l2 2M13 6l2 2"/>'},
+  {id:'protractor', key:'⇧U', name:'Protractor', svg:'<path d="M4 19h16"/><path d="M4 19L15 6"/><path d="M10 19a6 6 0 0 0-2.2-4.6"/>'}
 ];
 const HINTS = {
   select:'<b>Move</b> · drag players and the ball. A player on the ball carries it. Click a drawing to select it. Double-click a player to relabel.',
@@ -865,7 +868,8 @@ const HINTS = {
   pen:'<b>Pen</b> · freehand marks. Hold Shift for a straight line. Thickness, dotted and see-through in the bar below.',
   text:'<b>Text</b> · click to place a label. Size, label box and see-through in the bar below.',
   erase:'<b>Eraser</b> · click or drag over drawings to remove them.',
-  ruler:'<b>Ruler</b> · drag to measure. Shows pitch units and roughly meters. Use it to calibrate pass ranges.'
+  ruler:'<b>Ruler</b> · drag to measure (Shift snaps to 15°). Drag an end to swing it round the other end, Shift-drag an end to stretch it, drag the middle to move it. Esc clears.',
+  protractor:'<b>Protractor</b> · drag the first arm from the corner, then move and click to place the second. Drag the corner to move it, an arm end to swing it. Esc clears.'
 };
 
 /* ---------- helpers ---------- */
@@ -2888,7 +2892,10 @@ function drawBall(c, q, locked, lift, rot, noHalo){
 }
 function validPath(path, a, b){ return path && path.length > 1 && dist(P(path[0]), a) < 2.4 && dist(P(path[path.length-1]), b) < 2.4; }
 
+const LINE_TYPES = new Set(['arrow', 'bank', 'dive', 'pen']);
+let hideLines = false;
 function renderScene(c, pos, layers, o = {}){
+  if (hideLines) layers = layers.map(L => ({...L, shapes:L.shapes.filter(s => !LINE_TYPES.has(s.type))})); /* positions only: zones and text stay */
   const kf = o.keeperFrame || frame();
   scenePos = pos; sceneFrame = kf;
   drawPitch(c);
@@ -3744,7 +3751,7 @@ function draw(){
   if (anim.playing) timedClock(1);
   if (otsActive()){ otsUpdate(P0); applyView(); } else if (camv && camv.ots) endOTS();
   if (anim.playing && kicksLive(performance.now())) motionNow = buildMotion(P0, performance.now(), null);
-  let res; try { res = renderFrame(P0, tlay ? tlay.layers : [{shapes:f.shapes, alpha:1}], {eeFrame:anim.playing ? null : undefined, sel, draft, trails:trailInfo(), handleId, runReach: draft && draft.runner ? draft.runner : (tool === 'run' && !draft && hoverId ? hoverId : null), active: drag && drag.kind === 'piece' && drag.moved ? drag.id : null, after: (ruler || diveDraft || tlay || (reachRings && timedOn() && !anim.playing)) ? (c => { if (reachRings && timedOn() && !anim.playing) drawReachRings(c, f, cur); if (tlay) drawTimedMarks(c, tlay.marks); if (ruler) drawRuler(c); const ds = diveDraft && diveShapeFrom(diveDraft); if (ds) drawShape(c, ds, .85, false); }) : null}); } finally { motionNow = null; }
+  let res; try { res = renderFrame(P0, tlay ? tlay.layers : [{shapes:f.shapes, alpha:1}], {eeFrame:anim.playing ? null : undefined, sel, draft, trails:trailInfo(), handleId, runReach: draft && draft.runner ? draft.runner : (tool === 'run' && !draft && hoverId ? hoverId : null), active: drag && drag.kind === 'piece' && drag.moved ? drag.id : null, after: (ruler || diveDraft || tlay || (reachRings && timedOn() && !anim.playing)) ? (c => { if (reachRings && timedOn() && !anim.playing) drawReachRings(c, f, cur); if (tlay && !hideLines) drawTimedMarks(c, tlay.marks); if (ruler) drawRuler(c); const ds = diveDraft && diveShapeFrom(diveDraft); if (ds) drawShape(c, ds, .85, false); }) : null}); } finally { motionNow = null; }
   if (camv && camv.ots){ drawOTSRadar(P0); drawCrosshair(); } else drawMini(P0);
   updateStats(P0, res.lanes, res.shots);
   if (coop.on) drawCursors();
@@ -3806,6 +3813,7 @@ function hitOne(s, p){
 function hitShape(p){
   const sh = frame().shapes;
   const area = t => t === 'rect' || t === 'circle' || t === 'lasso';
+  if (hideLines){ for (let i = sh.length - 1; i >= 0; i--) if (!LINE_TYPES.has(sh[i].type) && hitOne(sh[i], p)) return sh[i]; return null; }
   for (let i = sh.length - 1; i >= 0; i--) if (!area(sh[i].type) && hitOne(sh[i], p)) return sh[i];
   for (let i = sh.length - 1; i >= 0; i--) if (area(sh[i].type) && hitOne(sh[i], p)) return sh[i];
   return null;
@@ -3937,7 +3945,7 @@ cv.addEventListener('pointerdown', e => {
   }
   if (tool === 'erase'){ drag = {kind:'erase', snapped:false}; eraseAt(p); return; }
   if (tool === 'text'){ openFloat(p, '', {kind:'text', p}, 'Type a label, then Enter'); return; }
-  if (tool === 'ruler'){ const sp = snapStart(p); ruler = {a:sp, b:sp, active:true}; draw(); return; }
+  if (tool === 'ruler' || tool === 'protractor'){ measDown(p, e); try { cv.setPointerCapture(e.pointerId); } catch {} draw(); return; }
   const sp = tool === 'pen' || tool === 'lasso' || e.altKey ? p : snapStart(p); /* hold Alt to start exactly where you click */
   if (tool === 'run' || tool === 'dribble') draft = {type:'arrow', style:tool, pts:[[sp.x, sp.y]], color};
   if (tool === 'run' && draft){ const rp = runnerAt([sp.x, sp.y], f); draft.runner = rp ? rp.id : null; draft.limit = runLimit(rp, f); }
@@ -3978,7 +3986,7 @@ cv.addEventListener('pointermove', e => {
       draw(); return;
     }
   }
-  if (ruler && ruler.active){ ruler.b = p; draw(); return; }
+  if (ruler && (ruler.active || ruler.mode === 'arm2')){ measMove(p, e); draw(); return; }
   if (draft){
     if (draft.type === 'arrow' && draft.style === 'pass') draft.pts[1] = [p.x, p.y];
     else if ((draft.type === 'pen' || draft.type === 'lasso') && e.shiftKey){ /* Shift: a straight line from where Shift went down */
@@ -4006,7 +4014,7 @@ cv.addEventListener('pointermove', e => {
   if (tool === 'select') cv.style.cursor = hp ? 'grab' : hitShape(p) ? 'move' : cam.z > 1.001 ? 'grab' : 'default';
 });
 function endPointer(){
-  if (ruler && ruler.active){ ruler.active = false; if (dist(ruler.a, ruler.b) < .3) ruler = null; draw(); }
+  if (ruler && ruler.active){ measUp(); draw(); }
   if (draft && draft.awaitClick && draft.adjusting){ const sh = bankDraftShape(draft); draft = null; sh.id = uid(); snapshot(); frame().shapes.push(sh); commit(); return; }
   if (draft && draft.awaitClick) return; /* finished with a click, not a release */
   if (draft){
@@ -4182,13 +4190,72 @@ function toggleStance(id){
   if (f.stance[id]) delete f.stance[id]; else f.stance[id] = true; commit();
 }
 const M_PER_UNIT = 1 / 1.0437; /* from the centre circle: 9.55 units = 9.15 m */
+/* ---------- Ruler & protractor ----------
+   ruler = {kind:'ruler', a, b} or {kind:'angle', v, a, b}; it stays on the board (not saved in the play) until Esc or a new one.
+   Ends swing round the other end at the same length (Shift: stretch), the middle / the corner moves the whole thing. */
+const snap15 = (o, p, on) => { if (!on) return p; const d = dist(o, p), a = Math.round(Math.atan2(p.y - o.y, p.x - o.x)/(Math.PI/12))*(Math.PI/12); return {x:o.x + Math.cos(a)*d, y:o.y + Math.sin(a)*d}; };
+function measHit(p){
+  const r = ruler, t = 1.1 + slop(p)*.6; if (!r) return null;
+  if (r.kind === 'ruler'){ if (dist(p, r.a) < t) return 'a'; if (dist(p, r.b) < t) return 'b'; if (segDist(p, r.a, r.b).d < .9 + slop(p)*.4) return 'body'; return null; }
+  if (dist(p, r.v) < t) return 'v'; if (r.a && dist(p, r.a) < t) return 'a'; if (r.b && dist(p, r.b) < t) return 'b';
+  if ((r.a && segDist(p, r.v, r.a).d < .8) || (r.b && segDist(p, r.v, r.b).d < .8)) return 'v';
+  return null;
+}
+function measDown(p, e){
+  const kind = tool === 'protractor' ? 'angle' : 'ruler';
+  if (ruler && ruler.mode === 'arm2'){ ruler.b = snap15(ruler.v, p, e.shiftKey); ruler.mode = null; ruler.active = false; return; } /* the click that places the second arm */
+  const h = ruler && ruler.kind === kind ? measHit(p) : null;
+  if (h){ const r = ruler; r.active = true; r.free = e.shiftKey;
+    if (h === 'body' || h === 'v'){ r.mode = 'move'; r.grab = {p, a:{...r.a}, b:r.b && {...r.b}, v:r.v && {...r.v}}; }
+    else { r.mode = 'end'; r.end = h; const o = kind === 'ruler' ? (h === 'a' ? r.b : r.a) : r.v; r.len = dist(o, r[h]); }
+    return; }
+  const sp = snapStart(p);
+  ruler = kind === 'ruler' ? {kind, a:sp, b:sp, active:true, mode:'draw'} : {kind, v:sp, a:sp, b:null, active:true, mode:'arm1'};
+}
+function measMove(p, e){
+  const r = ruler;
+  if (r.mode === 'draw') r.b = snap15(r.a, p, e.shiftKey);
+  else if (r.mode === 'arm1') r.a = snap15(r.v, p, e.shiftKey);
+  else if (r.mode === 'arm2') r.b = snap15(r.v, p, e.shiftKey);
+  else if (r.mode === 'move'){ const g = r.grab, dx = p.x - g.p.x, dy = p.y - g.p.y, sh = q => q && {x:q.x + dx, y:q.y + dy}; r.a = sh(g.a); if (g.b) r.b = sh(g.b); if (g.v) r.v = sh(g.v); }
+  else if (r.mode === 'end'){ const o = r.kind === 'ruler' ? (r.end === 'a' ? r.b : r.a) : r.v;
+    if (r.free || e.shiftKey) r[r.end] = p; /* Shift: stretch */
+    else { const d = dist(o, p) || 1; r[r.end] = {x:o.x + (p.x - o.x)/d*r.len, y:o.y + (p.y - o.y)/d*r.len}; } } /* swing round, same length */
+}
+function measUp(){
+  const r = ruler; r.active = false;
+  if (r.mode === 'draw' && dist(r.a, r.b) < .3){ ruler = null; return; }
+  if (r.mode === 'arm1'){ if (dist(r.v, r.a) < .5){ ruler = null; return; } r.mode = 'arm2'; r.b = {...r.a}; toast('Now move to place the second arm and click.'); return; }
+  r.mode = null;
+}
 function drawRuler(c){
-  const {a, b} = ruler, d = dist(a, b); if (d < .05) return;
-  c.save(); c.lineCap = 'round';
-  c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.setLineDash([.6, .4]); c.lineWidth = .22; c.strokeStyle = '#ffffff'; c.stroke(); c.setLineDash([]);
-  const nx = -(b.y - a.y)/d, ny = (b.x - a.x)/d;
-  for (const q of [a, b]){ c.beginPath(); c.moveTo(q.x - nx*.8, q.y - ny*.8); c.lineTo(q.x + nx*.8, q.y + ny*.8); c.lineWidth = .24; c.stroke(); }
-  fieldText(c, `${d.toFixed(1)} units · ≈${(d*M_PER_UNIT).toFixed(1)} m · run ${(d/SPEED.sprint).toFixed(2)}s · EE ${legTime(d, SPEED.sprint, true).toFixed(2)}s · pass ${(d/SPEED.pass).toFixed(2)}s · shot ${(d/SPEED.shot).toFixed(2)}s`, (a.x + b.x)/2 + nx*1.6, (a.y + b.y)/2 + ny*1.6, 1.3, '#ffffff');
+  const r = ruler; c.save(); c.lineCap = 'round';
+  const handles = tool === 'ruler' && r.kind === 'ruler' || tool === 'protractor' && r.kind === 'angle';
+  const dot = q => { c.beginPath(); c.arc(q.x, q.y, .5, 0, Math.PI*2); c.fillStyle = '#ffffff'; c.fill(); c.lineWidth = .14; c.strokeStyle = '#11161d'; c.stroke(); };
+  const seg = (a, b) => { c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.setLineDash([.6, .4]); c.lineWidth = .22; c.strokeStyle = '#ffffff'; c.stroke(); c.setLineDash([]); };
+  if (r.kind === 'ruler'){
+    const {a, b} = r, d = dist(a, b); if (d < .05){ c.restore(); return; }
+    seg(a, b);
+    const nx = -(b.y - a.y)/d, ny = (b.x - a.x)/d;
+    for (const q of [a, b]){ c.beginPath(); c.moveTo(q.x - nx*.8, q.y - ny*.8); c.lineTo(q.x + nx*.8, q.y + ny*.8); c.lineWidth = .24; c.stroke(); }
+    /* angle off the pitch's long axis (0° = straight up the pitch, 90° = straight across) */
+    let ang = Math.abs(Math.atan2(b.y - a.y, b.x - a.x))*180/Math.PI; if (ang > 90) ang = 180 - ang;
+    fieldText(c, `${d.toFixed(1)} units · ≈${(d*M_PER_UNIT).toFixed(1)} m · ${Math.round(ang)}° · run ${(d/SPEED.sprint).toFixed(2)}s · EE ${legTime(d, SPEED.sprint, true).toFixed(2)}s · pass ${(d/SPEED.pass).toFixed(2)}s · shot ${(d/SPEED.shot).toFixed(2)}s`, (a.x + b.x)/2 + nx*1.6, (a.y + b.y)/2 + ny*1.6, .95, '#ffffff');
+    if (handles) [a, b].forEach(dot);
+  } else {
+    const {v, a} = r, b = r.b;
+    if (a && dist(v, a) > .05) seg(v, a); if (b && dist(v, b) > .05) seg(v, b);
+    if (a && b && dist(v, a) > .3 && dist(v, b) > .3){
+      const t1 = Math.atan2(a.y - v.y, a.x - v.x), t2 = Math.atan2(b.y - v.y, b.x - v.x); let dd = t2 - t1; while (dd > Math.PI) dd -= 2*Math.PI; while (dd < -Math.PI) dd += 2*Math.PI;
+      const R = Math.min(4, dist(v, a)*.45, dist(v, b)*.45);
+      c.beginPath(); c.moveTo(v.x, v.y); c.arc(v.x, v.y, R, t1, t1 + dd, dd < 0); c.closePath(); c.fillStyle = 'rgba(242,179,61,.22)'; c.fill();
+      c.beginPath(); c.arc(v.x, v.y, R, t1, t1 + dd, dd < 0); c.lineWidth = .2; c.strokeStyle = '#f2b33d'; c.stroke();
+      const mid = t1 + dd/2, deg = Math.abs(dd)*180/Math.PI;
+      fieldText(c, `${deg.toFixed(deg < 10 ? 1 : 0)}°`, v.x + Math.cos(mid)*(R + 1.8), v.y + Math.sin(mid)*(R + 1.8), 1.25, '#f2b33d', `800 20px ${FD}`);
+      for (const q of [a, b]) fieldText(c, `${dist(v, q).toFixed(1)}`, (v.x + q.x)/2 + (q.y - v.y)/dist(v, q)*1.1, (v.y + q.y)/2 - (q.x - v.x)/dist(v, q)*1.1, .8, 'rgba(255,255,255,.85)');
+    }
+    if (handles){ dot(v); if (a) dot(a); if (b) dot(b); }
+  }
   c.restore();
 }
 cv.addEventListener('dblclick', e => {
@@ -4289,7 +4356,7 @@ function setPen(k, v){ penCfg[k] = v; syncPenBar(); saveSettings();
   /* a selected pen stroke follows along */
   const s = selShape(); if (s && s.type === 'pen'){ snapshot(); Object.assign(s, {w:penCfg.w, dots:penCfg.dots, clear:penCfg.clear}); if (s.w === 'med') delete s.w; if (!s.dots) delete s.dots; if (!s.clear) delete s.clear; commit(); } }
 function setTool(t){
-  tool = t; draft = null; closeFloat(true); if (t !== 'ruler' && ruler){ ruler = null; draw(); }
+  tool = t; draft = null; closeFloat(true); if (ruler && ruler.mode === 'arm2'){ ruler = null; draw(); } /* a measurement stays on the board until Esc or a new one */
   document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
   $('#hint').innerHTML = HINTS[t]; cv.style.cursor = t === 'select' ? 'default' : t === 'text' ? 'text' : 'crosshair';
   if (t !== 'select' && sel){ sel = null; syncSel(); draw(); }
@@ -5362,6 +5429,9 @@ for (const ev of ['focus', 'pointerdown']) $('#zoomFollow').addEventListener(ev,
 $('#otsBtn').addEventListener('click', () => { otsOn = !otsOn; saveSettings(); syncZoomUI(); if (!otsOn) endOTS();
   if (otsOn){ hoverId = null; draft = null; if (sel){ sel = null; syncSel(); } } redraw();
   toast(otsOn ? (followBall && followId !== 'ball' ? 'Over-the-shoulder on: drag to look around, Space to play. Drawing is off until you turn it off.' : 'Over-the-shoulder on. Pick a player in Follow (1–0) to stand behind them.') : 'Over-the-shoulder off — drawing is back.'); });
+function toggleLines(on){ hideLines = on === undefined ? !hideLines : on; $('#linesBtn').setAttribute('aria-pressed', hideLines); if (hideLines && sel){ sel = null; syncSel(); } draw();
+  toast(hideLines ? 'Lines hidden: just the positions (zones and text stay). Shift+H brings them back.' : 'Lines shown.'); }
+$('#linesBtn').addEventListener('click', () => toggleLines());
 $('#focusBtn').addEventListener('click', () => { focusOn = !focusOn; saveSettings(); syncZoomUI(); redraw();
   toast(focusOn ? (followBall && followId !== 'ball' ? 'Focus on: everyone else dims during playback.' : 'Focus on. Pick a player in Follow to focus on them during playback.') : 'Focus off.'); });
 $('#fsBtn').addEventListener('click', () => {
@@ -5391,7 +5461,7 @@ function optKeys(){
   $('#optKeys').innerHTML = '<h3>Tools</h3>' + TOOLS.filter(t => document.querySelector(`[data-tool="${t.id}"]`)).map(t => K(t.key, t.name)).join('') +
     '<h3>While drawing</h3>' + [['Shift', 'Aerial pass or shot · lofted wall pass · straight pen line or zone edge'], ['Q', 'Extra Effort on the run'], ['[ ]', 'Curve a shot (scroll works too) · pen thickness'], ['V', 'Receiver volleys an aerial pass'], ['W', 'Next wall for a wall pass'], ['Alt', 'Start exactly where you click'], ['Esc', 'Cancel']].map(r => K(...r)).join('') +
     '<h3>Steps and playback</h3>' + [['Space', 'Play / pause'], ['← →', 'Previous / next step'], ['N', 'Next step'], ['`', 'Camera follows the ball'], ['1–5 6–0', 'Follow a home / away player'], ['K', 'Follow the ball on / off']].map(r => K(...r)).join('') +
-    '<h3>Board</h3>' + [['Ctrl+Z', 'Undo'], ['Ctrl+Shift+Z', 'Redo'], ['Ctrl+S', 'Save play'], ['Delete', 'Remove the selected drawing or hovered player'], ['X', 'Defensive stance (hovered player)'], ['Y', 'Next camera view'], ['+ −', 'Zoom'], ['Shift+0', 'Fit the board'], ['Shift+1–5', 'Drawing colour'], ['H', 'Clean view'], ['Ctrl+,', 'Options']].map(r => K(...r)).join('') +
+    '<h3>Board</h3>' + [['Ctrl+Z', 'Undo'], ['Ctrl+Shift+Z', 'Redo'], ['Ctrl+S', 'Save play'], ['Delete', 'Remove the selected drawing or hovered player'], ['X', 'Defensive stance (hovered player)'], ['Y', 'Next camera view'], ['+ −', 'Zoom'], ['Shift+0', 'Fit the board'], ['Shift+1–5', 'Drawing colour'], ['H', 'Clean view'], ['Shift+H', 'Hide lines (positions only)'], ['Shift+U', 'Protractor'], ['Ctrl+,', 'Options']].map(r => K(...r)).join('') +
     '<h3>Analysis</h3>' + [['C', 'Space control'], ['L', 'Passing lanes'], ['S', 'Shot window'], ['G', 'Pressure rings'], ['A', 'Pass range'], ['M', 'Grid']].map(r => K(...r)).join('');
 }
 function optOpen(tab){ optSync(); optKeys(); $('#optBack').hidden = false; if (tab) optTab(tab); setTimeout(() => $('#optClose').focus(), 0); }
@@ -5447,6 +5517,7 @@ document.addEventListener('keydown', e => {
   if (tool === 'text' && k === ','){ setText('clear', !textCfg.clear); return; }
   if (tool === 'pen' && k === ','){ setPen('clear', !penCfg.clear); return; }
   if (k === 'w'){ cycleWall(); return; }
+  if (k === 'u' && e.shiftKey){ setTool('protractor'); return; }
   if (KEYS[k]){ setTool(KEYS[k]); return; }
   /* number row: ` follows the ball, 1–5 home players, 6–9 and 0 away players (again to stop).
      Shift+1–5 picks a drawing colour, Shift+0 fits the whole pitch. */
@@ -5464,6 +5535,8 @@ document.addEventListener('keydown', e => {
   if (k === 'arrowleft'){ e.preventDefault(); goStep(cur - 1); return; }
   if (k === ' '){ e.preventDefault(); anim.playing ? stopPlay() : startPlay(); return; }
   if (k === 'n'){ addStep(); return; }
+  if (k === 'h' && e.shiftKey){ toggleLines(); return; }
+  if (k === 'u' && e.shiftKey){ setTool('protractor'); return; }
   if (k === 'h'){ toggleClean(); return; }
   if (k === '=' || k === '+'){ zoomStep(1); return; }
   if (k === '-' || k === '_'){ zoomStep(-1); return; }
@@ -5478,6 +5551,7 @@ document.addEventListener('keydown', e => {
   if (k === 'x'){ if (hoverId) toggleStance(hoverId); return; }
   if (k === 'q'){ if (hoverId) toggleEE(hoverId); return; }
   if (k === 'escape' && !cm.hidden){ closeMenu(); return; }
+  if (k === 'escape' && ruler){ ruler = null; draw(); return; }
   if (k === 'escape' && diveDraft){ diveDraft = null; draw(); return; }
   if (k === 'escape'){ if (document.body.classList.contains('clean')) toggleClean(false); else { sel = null; draft = null; syncSel(); draw(); } }
 });
