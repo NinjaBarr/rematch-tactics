@@ -429,6 +429,13 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 @keyframes intro-pop{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:none}}
 @keyframes intro-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes intro-out{to{opacity:0;visibility:hidden}}
+/* opening wave: every block of the UI drops in and unfolds into its place, rolling from top-left to bottom-right (~2 s) */
+.wave-pre .topbar>*,.wave-pre .tools>*,.wave-pre #stage,.wave-pre .panel>*,.wave-pre .timeline>*{opacity:0}
+.wave-el{animation:ui-wave .62s cubic-bezier(.22,.9,.28,1.18) var(--wd,0s) both;transform-origin:50% 0;will-change:transform,opacity,clip-path}
+@keyframes ui-wave{0%{opacity:0;transform:translateY(-22px) scaleY(.55);clip-path:inset(0 0 100% 0)}45%{opacity:1}100%{opacity:1;transform:none;clip-path:inset(0 0 -40% 0)}}
+.wave-sheen{position:fixed;inset:0;z-index:90;pointer-events:none;background:linear-gradient(115deg,transparent 0 38%,rgba(120,180,255,.10) 46%,rgba(255,255,255,.16) 50%,rgba(120,180,255,.10) 54%,transparent 62% 100%);background-size:300% 100%;animation:wave-sheen 1.7s cubic-bezier(.4,0,.2,1) both}
+@keyframes wave-sheen{from{background-position:100% 0}to{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.wave-pre .topbar>*,.wave-pre .tools>*,.wave-pre #stage,.wave-pre .panel>*,.wave-pre .timeline>*{opacity:1}.wave-el{animation:none}.wave-sheen{display:none}}
 @media (prefers-reduced-motion:reduce){.intro-pic,.intro-txt{animation:intro-fade .2s both}.intro{animation:intro-out .2s linear .8s forwards}@keyframes intro-fade{from{opacity:0}}}
 
 /* Co-op */
@@ -6099,8 +6106,21 @@ function boot(){
 try { boot(); const nj = document.getElementById('nojs'); if (nj) nj.remove();
   if ((location.protocol === 'https:' || location.hostname === 'localhost') && 'serviceWorker' in navigator && !embedded && document.querySelector('link[rel="manifest"]')) navigator.serviceWorker.register('sw.js').catch(() => {}); }
 catch (err){ const m = document.getElementById('nojsMsg'); if (m) m.textContent = 'The board hit an error while starting: ' + (err && err.message || err) + '. Try opening it in Chrome or Edge, and send this message to whoever made it.'; const ii = document.getElementById('intro'); if (ii) ii.remove(); throw err; }
+/* the opening wave (starts as the intro fades, or straight away if there's no intro) */
+function uiWave(){
+  const root = document.documentElement; if (root.dataset.waved) return; root.dataset.waved = '1';
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches){ root.classList.remove('wave-pre'); return; }
+  const els = [...document.querySelectorAll('.topbar>*, .tools>*, #stage, .panel>*, .timeline>*')].filter(e => e.offsetParent !== null || e.id === 'stage');
+  const vw = innerWidth || 1, vh = innerHeight || 1; let end = 0;
+  for (const e of els){ const r = e.getBoundingClientRect(), cx = (r.left + r.width/2)/vw, cy = (r.top + Math.min(r.height, 120)/2)/vh;
+    const d = (cx*.72 + cy*.38)*1.15; end = Math.max(end, d); e.style.setProperty('--wd', d.toFixed(3) + 's'); e.classList.add('wave-el'); }
+  const sh = document.createElement('div'); sh.className = 'wave-sheen'; document.body.appendChild(sh);
+  root.classList.remove('wave-pre');
+  setTimeout(() => { for (const e of els){ e.classList.remove('wave-el'); e.style.removeProperty('--wd'); } sh.remove(); }, (end + .7)*1000);
+}
+document.documentElement.classList.add('wave-pre');
 /* the intro removes itself after a second; a click or any key skips it */
-{ const el = document.getElementById('intro');
+{ const el = document.getElementById('intro'); if (!el) uiWave(); else setTimeout(uiWave, 700);
   /* a short rising chime under the intro, timed to the picture popping in. Browsers only allow sound once
      you have clicked something, so it plays in the desktop app (and wherever the browser allows it) */
   let jingleOut = null;
@@ -6128,7 +6148,7 @@ catch (err){ const m = document.getElementById('nojsMsg'); if (m) m.textContent 
     if (ac && ac.state === 'running') play();
     else if (ac) ac.resume().then(play, () => {});
   } } catch {}
-  const done = () => { if (jingleOut){ const {out, wet, ac} = jingleOut, t = ac.currentTime; for (const g of [out, wet]){ g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + .35); } jingleOut = null; }
+  const done = () => { uiWave(); if (jingleOut){ const {out, wet, ac} = jingleOut, t = ac.currentTime; for (const g of [out, wet]){ g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + .35); } jingleOut = null; }
     if (el.isConnected) el.remove(); };
   el.addEventListener('animationend', e => { if (e.animationName === 'intro-out' && el.isConnected) el.remove(); });
   const skip = () => { if (el.isConnected) done(); };
