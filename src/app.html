@@ -437,6 +437,9 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .wave-b .wave-el{animation:ui-wave-b .8s cubic-bezier(.2,.75,.3,1) var(--wd,0s) both;transform-origin:50% 0;backface-visibility:hidden}
 @keyframes ui-wave-b{0%{opacity:0;transform:perspective(900px) translateY(-26px) translateZ(-60px) rotateX(-88deg);filter:brightness(1.6)}
   40%{opacity:1}62%{transform:perspective(900px) translateZ(14px) rotateX(9deg);filter:brightness(1.15)}82%{transform:perspective(900px) rotateX(-2.5deg)}100%{opacity:1;transform:none;filter:none}}
+.wave-pop{animation:ui-pop .5s cubic-bezier(.3,.8,.35,1) var(--wd,0s) both;transform-origin:50% 60%}
+@keyframes ui-pop{0%{opacity:0;transform:translateY(-14px) scale(.55)}50%{opacity:1;transform:translateY(1px) scale(1.12);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 70%,transparent)}
+  72%{transform:scale(.97);box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 0%,transparent)}100%{opacity:1;transform:none;box-shadow:none}}
 .wave-switch{position:fixed;left:14px;bottom:76px;z-index:95;display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:10px;background:rgba(8,12,18,.88);border:1px solid var(--line);font:600 12px var(--f-body,system-ui);color:var(--muted)}
 .wave-switch button{padding:4px 10px;height:auto}
 .wave-sheen{position:fixed;inset:0;z-index:90;pointer-events:none;background:linear-gradient(115deg,transparent 0 38%,rgba(120,180,255,.10) 46%,rgba(255,255,255,.16) 50%,rgba(120,180,255,.10) 54%,transparent 62% 100%);background-size:300% 100%;animation:wave-sheen 1.7s cubic-bezier(.4,0,.2,1) both}
@@ -6114,21 +6117,26 @@ try { boot(); const nj = document.getElementById('nojs'); if (nj) nj.remove();
 catch (err){ const m = document.getElementById('nojsMsg'); if (m) m.textContent = 'The board hit an error while starting: ' + (err && err.message || err) + '. Try opening it in Chrome or Edge, and send this message to whoever made it.'; const ii = document.getElementById('intro'); if (ii) ii.remove(); throw err; }
 /* the opening wave (starts as the intro fades, or straight away if there's no intro) */
 const WAVE_PREVIEW = true; /* preview build only: a switcher to replay and compare the versions */
-let waveVariant = 'b';
+let waveVariant = 'c';
 function uiWave(){
   const root = document.documentElement; if (root.dataset.waved) return; root.dataset.waved = '1';
   root.classList.toggle('wave-b', waveVariant === 'b');
   if (matchMedia('(prefers-reduced-motion: reduce)').matches){ root.classList.remove('wave-pre'); return; }
-  const els = [...document.querySelectorAll('.topbar>*, .tools>*, #stage, .panel>*, .timeline>*')].filter(e => e.offsetParent !== null || e.id === 'stage');
+  const vis = e => e.offsetParent !== null || e.id === 'stage';
+  const C = waveVariant === 'c';
+  /* C: big surfaces drop like A, then every button / control on them pops in on its own */
+  const els = [...document.querySelectorAll(C ? '#stage, .tools, .panel>*, .timeline' : '.topbar>*, .tools>*, #stage, .panel>*, .timeline>*')].filter(vis);
+  const pops = C ? [...document.querySelectorAll('.brand-mark, .brand>span, .support-btn, #playName, .topbar .btn, .topbar .look-fab, .tools .tool, .tools .swatch, #zoombar .btn, #zoombar .follow, .timeline>*:not(.tl-opts), .tl-opts>*, .panel .card-head, .panel .btn, .panel .field, .panel .chip')].filter(vis) : [];
   const vw = innerWidth || 1, vh = innerHeight || 1; let end = 0;
-  for (const e of els){ const r = e.getBoundingClientRect(), cx = (r.left + r.width/2)/vw, cy = (r.top + Math.min(r.height, 120)/2)/vh;
-    const d = (cx*.72 + cy*.38)*(waveVariant === 'b' ? 1.05 : 1.15); end = Math.max(end, d); e.style.setProperty('--wd', d.toFixed(3) + 's'); e.classList.add('wave-el'); }
+  const at = (e, k) => { const r = e.getBoundingClientRect(), cx = (r.left + r.width/2)/vw, cy = (r.top + Math.min(r.height, 120)/2)/vh; return (cx*.72 + cy*.38)*k; };
+  for (const e of els){ const d = at(e, waveVariant === 'b' ? 1.05 : 1.15); end = Math.max(end, d); e.style.setProperty('--wd', d.toFixed(3) + 's'); e.classList.add('wave-el'); }
+  for (const e of pops){ const d = at(e, 1.12) + .14; end = Math.max(end, d); e.style.setProperty('--wd', d.toFixed(3) + 's'); e.classList.add('wave-pop'); }
   const sh = document.createElement('div'); sh.className = 'wave-sheen'; document.body.appendChild(sh);
   root.classList.remove('wave-pre');
-  setTimeout(() => { for (const e of els){ e.classList.remove('wave-el'); e.style.removeProperty('--wd'); } sh.remove(); }, (end + .9)*1000);
+  setTimeout(() => { for (const e of [...els, ...pops]){ e.classList.remove('wave-el', 'wave-pop'); e.style.removeProperty('--wd'); } sh.remove(); }, (end + .9)*1000);
 }
 if (WAVE_PREVIEW){ const w = document.createElement('div'); w.className = 'wave-switch';
-  w.innerHTML = 'Replay wave <button class="btn" data-w="a">A · Drop</button><button class="btn" data-w="b">B · 3D flip</button>';
+  w.innerHTML = 'Replay wave <button class="btn" data-w="a">A · Drop</button><button class="btn" data-w="b">B · 3D flip</button><button class="btn" data-w="c">C · Pop</button>';
   w.addEventListener('click', e => { const b = e.target.closest('[data-w]'); if (!b) return; waveVariant = b.dataset.w; const root = document.documentElement; delete root.dataset.waved; root.classList.add('wave-pre'); setTimeout(uiWave, 250); });
   document.body.appendChild(w); }
 document.documentElement.classList.add('wave-pre');
