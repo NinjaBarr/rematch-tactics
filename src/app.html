@@ -440,6 +440,13 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 .wave-pop{animation:ui-pop .5s cubic-bezier(.3,.8,.35,1) var(--wd,0s) both;transform-origin:50% 60%}
 @keyframes ui-pop{0%{opacity:0;transform:translateY(-14px) scale(.55)}50%{opacity:1;transform:translateY(1px) scale(1.12);box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 70%,transparent)}
   72%{transform:scale(.97);box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 0%,transparent)}100%{opacity:1;transform:none;box-shadow:none}}
+.wave-paper{animation:ui-paper .62s cubic-bezier(.45,.05,.3,1) var(--wd,0s) both;transform-origin:50% 0}
+@keyframes ui-paper{0%{clip-path:inset(0 0 100% 0);transform:perspective(900px) rotateX(22deg) translateY(-4px)}70%{transform:perspective(900px) rotateX(3deg)}100%{clip-path:inset(0 0 0 0);transform:none}}
+/* the curled edge of the "sticker" travelling down with the reveal: pale back of the paper, a crisp fold, a soft shadow under it */
+.paper-curl{position:fixed;z-index:91;pointer-events:none;border-radius:0 0 50% 50%/0 0 100% 100%;
+  background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(236,242,250,.55) 38%,rgba(250,252,255,.95) 58%,rgba(10,14,20,.55) 60%,rgba(10,14,20,0) 100%);
+  animation:paper-curl .62s cubic-bezier(.45,.05,.3,1) var(--wd,0s) both}
+@keyframes paper-curl{0%{opacity:0;transform:translateY(0) scaleY(.6)}8%{opacity:1}85%{opacity:1;transform:translateY(var(--h)) scaleY(1)}100%{opacity:0;transform:translateY(var(--h)) scaleY(.3)}}
 .wave-switch{position:fixed;left:14px;bottom:76px;z-index:95;display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:10px;background:rgba(8,12,18,.88);border:1px solid var(--line);font:600 12px var(--f-body,system-ui);color:var(--muted)}
 .wave-switch button{padding:4px 10px;height:auto}
 .wave-sheen{position:fixed;inset:0;z-index:90;pointer-events:none;background:linear-gradient(115deg,transparent 0 38%,rgba(120,180,255,.10) 46%,rgba(255,255,255,.16) 50%,rgba(120,180,255,.10) 54%,transparent 62% 100%);background-size:300% 100%;animation:wave-sheen 1.7s cubic-bezier(.4,0,.2,1) both}
@@ -6117,13 +6124,24 @@ try { boot(); const nj = document.getElementById('nojs'); if (nj) nj.remove();
 catch (err){ const m = document.getElementById('nojsMsg'); if (m) m.textContent = 'The board hit an error while starting: ' + (err && err.message || err) + '. Try opening it in Chrome or Edge, and send this message to whoever made it.'; const ii = document.getElementById('intro'); if (ii) ii.remove(); throw err; }
 /* the opening wave (starts as the intro fades, or straight away if there's no intro) */
 const WAVE_PREVIEW = true; /* preview build only: a switcher to replay and compare the versions */
-let waveVariant = 'c';
+let waveVariant = 'd';
 function uiWave(){
   const root = document.documentElement; if (root.dataset.waved) return; root.dataset.waved = '1';
   root.classList.toggle('wave-b', waveVariant === 'b');
   if (matchMedia('(prefers-reduced-motion: reduce)').matches){ root.classList.remove('wave-pre'); return; }
   const vis = e => e.offsetParent !== null || e.id === 'stage';
   const C = waveVariant === 'c';
+  if (waveVariant === 'd'){ /* D: every piece is a sheet of paper / a sticker, smoothed down from its top edge, top of the screen first */
+    const sheets = [...document.querySelectorAll('.topbar>*, .tools, #stage, .panel>*, .timeline')].filter(vis), curls = []; let endD = 0;
+    const vw = innerWidth || 1, vh = innerHeight || 1;
+    for (const e of sheets){ const r = e.getBoundingClientRect(), d = ((r.top/vh)*.85 + ((r.left + r.width/2)/vw)*.3)*1.25; endD = Math.max(endD, d);
+      e.style.setProperty('--wd', d.toFixed(3) + 's'); e.classList.add('wave-paper');
+      const band = Math.max(10, Math.min(30, r.height*.3)), cu = document.createElement('div'); cu.className = 'paper-curl';
+      Object.assign(cu.style, {left:r.left + 'px', top:(r.top - band*.6) + 'px', width:r.width + 'px', height:band + 'px'}); cu.style.setProperty('--h', r.height + 'px'); cu.style.setProperty('--wd', d.toFixed(3) + 's');
+      document.body.appendChild(cu); curls.push(cu); }
+    root.classList.remove('wave-pre');
+    setTimeout(() => { for (const e of sheets){ e.classList.remove('wave-paper'); e.style.removeProperty('--wd'); } curls.forEach(c => c.remove()); }, (endD + .8)*1000);
+    return; }
   /* C: big surfaces drop like A, then every button / control on them pops in on its own */
   const els = [...document.querySelectorAll(C ? '#stage, .tools, .panel>*, .timeline' : '.topbar>*, .tools>*, #stage, .panel>*, .timeline>*')].filter(vis);
   const pops = C ? [...document.querySelectorAll('.brand-mark, .brand>span, .support-btn, #playName, .topbar .btn, .topbar .look-fab, .tools .tool, .tools .swatch, #zoombar .btn, #zoombar .follow, .timeline>*:not(.tl-opts), .tl-opts>*, .panel .card-head, .panel .btn, .panel .field, .panel .chip')].filter(vis) : [];
@@ -6136,7 +6154,7 @@ function uiWave(){
   setTimeout(() => { for (const e of [...els, ...pops]){ e.classList.remove('wave-el', 'wave-pop'); e.style.removeProperty('--wd'); } sh.remove(); }, (end + .9)*1000);
 }
 if (WAVE_PREVIEW){ const w = document.createElement('div'); w.className = 'wave-switch';
-  w.innerHTML = 'Replay wave <button class="btn" data-w="a">A · Drop</button><button class="btn" data-w="b">B · 3D flip</button><button class="btn" data-w="c">C · Pop</button>';
+  w.innerHTML = 'Replay wave <button class="btn" data-w="a">A · Drop</button><button class="btn" data-w="b">B · 3D flip</button><button class="btn" data-w="c">C · Pop</button><button class="btn" data-w="d">D · Paper</button>';
   w.addEventListener('click', e => { const b = e.target.closest('[data-w]'); if (!b) return; waveVariant = b.dataset.w; const root = document.documentElement; delete root.dataset.waved; root.classList.add('wave-pre'); setTimeout(uiWave, 250); });
   document.body.appendChild(w); }
 document.documentElement.classList.add('wave-pre');
