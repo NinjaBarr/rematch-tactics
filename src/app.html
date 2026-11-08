@@ -3803,7 +3803,7 @@ function draw(){
    Timing model: a defender reacts after REACT s, then reaches a spot at sprint speed (Extra Effort if ready),
    stretching DEF_REACH units. A ball can't be touched in its first passCfg.noTouch units. */
 let suggOn = false, suggHover = -1, suggCache = {key:'', list:null, msg:''};
-const SUGG_REACT = .2, DEF_REACH = 1.2, SUGG_N = 5;
+const SUGG_REACT = .2, DEF_REACH = 1.2, SUGG_N = 5, SUGG_GK_REACT = .25, SUGG_GK_DIVE = .5;
 function suggGoalVal(team, q){ const gx = team === 'home' ? W : 0, d = Math.hypot(gx - q.x, H/2 - q.y); return Math.exp(-d/20); }
 function suggInPitch(q, m){ m = m == null ? 1.5 : m; return q.x > m && q.x < W - m && q.y > m && q.y < H - m; }
 /* lofted ball's time in the air over d units (the flatter of the two aims that land there), or null when out of range */
@@ -3868,13 +3868,25 @@ function computeSuggest(f){
       s.lead ? `${fw ? 'Through ball' : 'Pass into space'} for ${who}` : `Pass to ${who}`;
     s.shapes = [s.kind === 'wall' ? {type:'bank', a:A, t:[s.q.x, s.q.y], wall:s.wall} : s.kind === 'aerial' ? {type:'arrow', style:'pass', air:true, recv:'control', pts:[A, [s.q.x, s.q.y]]} : {type:'arrow', style:'pass', pts:[A, [s.q.x, s.q.y]]}];
   }
-  /* shot */
+  /* shot: a spot in the goal only counts if the ball gets past every body AND past the keeper, who reacts
+     (SUGG_GK_REACT s), then dives up to DIVE_MAX units in SUGG_GK_DIVE s, and runs beyond that.
+     Far out, the ball takes long enough that a keeper reaches almost anything. */
   const S = computeShots(pos, f), gd = Math.hypot(gx - a.x, H/2 - a.y);
-  if (S && S.pct > .08 && gd < 48){
-    const runs = []; let st = null; S.samples.forEach((s, i) => { if (s.ok && st === null) st = i; if ((!s.ok || i === S.samples.length - 1) && st !== null){ runs.push([st, s.ok ? i : i - 1]); st = null; } });
-    const best = runs.sort((p, q) => (q[1] - q[0]) - (p[1] - p[0]))[0], y = (S.samples[best[0]].y + S.samples[best[1]].y)/2;
-    const xg = Math.pow(S.pct, .7)*Math.exp(-gd/26);
-    out.push({kind:'shot', q:{x:gx, y}, safe:1, space:1, xg, gain:0, pct:S.pct, gd, shapes:[{type:'arrow', style:'pass', shot:true, pts:[A, [gx + dir*.6, y]]}], title:'Shoot'});
+  const oppTeam = team === 'home' ? 'away' : 'home', gkId = f.keeper && f.keeper[oppTeam], gk = gkId && piece(gkId) && doc.show[oppTeam] ? pos[gkId] : null;
+  const gkTime = d => SUGG_GK_REACT + (d <= DIVE_MAX ? SUGG_GK_DIVE*d/DIVE_MAX : SUGG_GK_DIVE + (d - DIVE_MAX)/SPEED.sprint);
+  const saves = Q => { if (!gk) return false; const L = dist(a, Q);
+    for (let u = .35; u <= 1.0001; u += .05){ const x = a.x + (Q.x - a.x)*u, y = a.y + (Q.y - a.y)*u;
+      if (gkTime(Math.max(0, Math.hypot(gk.x - x, gk.y - y) - PR)) <= u*L/SPEED.shot) return true; }
+    return false; };
+  if (S && S.pct > .05 && gd < 48){
+    const beat = S.samples.map(q => q.ok && !saves({x:gx, y:q.y}));
+    const pct = beat.filter(Boolean).length/beat.length;
+    if (pct > .04){
+      const runs = []; let st = null; beat.forEach((ok, i) => { if (ok && st === null) st = i; if ((!ok || i === beat.length - 1) && st !== null){ runs.push([st, ok ? i : i - 1]); st = null; } });
+      const best = runs.sort((p, q) => (q[1] - q[0]) - (p[1] - p[0]))[0], y = (S.samples[best[0]].y + S.samples[best[1]].y)/2;
+      const xg = Math.pow(pct, .6)*Math.exp(-gd/30);
+      out.push({kind:'shot', q:{x:gx, y}, safe:1, space:1, xg, gain:0, pct, open:S.pct, gd, shapes:[{type:'arrow', style:'pass', shot:true, pts:[A, [gx + dir*.6, y]]}], title:gk ? 'Shoot past the keeper' : 'Shoot'});
+    }
   }
   /* carry: dribble into the space ahead */
   const toG = Math.atan2(H/2 - a.y, gx - a.x), vd = SPEED.sprint*.85;
@@ -3885,8 +3897,8 @@ function computeSuggest(f){
     if (m > .15 && (q.x - a.x)*dir > 2.5) out.push({kind:'dribble', q, safe:m, space:m, gain:gain(q), shapes:[{type:'arrow', style:'dribble', pts:[A, [q.x, q.y]]}], title:'Carry it forward'});
   }
   for (const s of out){
-    s.score = clamp(Math.round(s.kind === 'shot' ? s.xg*220 : (s.gain*.7 + 26*clamp(fwd(s.q)/25, -1, 1.2) + Math.min(1, s.safe)*14 + Math.min(1.5, s.space)/1.5*10 - (s.wait > .6 ? 6 : 0) + 6)), 1, 99);
-    if (s.kind === 'shot') s.why = `${Math.round(s.pct*100)}% of the goal open · ${Math.round(s.gd)} units out`;
+    s.score = clamp(Math.round(s.kind === 'shot' ? s.xg*150 : (s.gain*.7 + 26*clamp(fwd(s.q)/25, -1, 1.2) + Math.min(1, s.safe)*14 + Math.min(1.5, s.space)/1.5*10 - (s.wait > .6 ? 6 : 0) + 6)), 1, 99);
+    if (s.kind === 'shot') s.why = `${Math.round(s.pct*100)}% of the goal beats the keeper${s.open - s.pct > .1 ? ` (${Math.round(s.open*100)}% unblocked)` : ''} · ${Math.round(s.gd)} units out`;
     else if (s.kind === 'dribble') s.why = `${Math.round(fwd(s.q))} units forward · nearest defender ${secs(s.safe)} away`;
     else s.why = [s.kind === 'aerial' ? 'over the lane' : s.kind === 'wall' ? 'round the press' : `lane clear by ${secs(s.safe)}`, ...(s.wait > .3 ? [`wait ${s.wait.toFixed(1)} s for the run`] : []),
                   `${secs(s.space)} to control it`, fwd(s.q) > 2 ? `+${Math.round(fwd(s.q))} forward` : fwd(s.q) < -2 ? 'back to keep it' : 'square'].join(' · ');
