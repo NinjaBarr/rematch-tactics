@@ -117,6 +117,20 @@ body.clean .zoombar:hover,body.clean .zoombar:focus-within{opacity:1}
 #followWrap select{appearance:none;-webkit-appearance:none;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;max-width:170px;padding:0 14px 0 0;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:calc(100% - 6px) 55%,calc(100% - 2px) 55%;background-size:4px 4px;background-repeat:no-repeat}
 #otsBtn[aria-pressed="true"],#otsBtn.dimmed[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #otsBtn.dimmed{opacity:.55}
+#suggBtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.sugg-panel{position:absolute;right:12px;top:52px;width:310px;max-width:calc(100% - 24px);background:color-mix(in srgb,var(--surface) 94%,transparent);border:1px solid var(--line);border-radius:12px;padding:8px;z-index:6;box-shadow:0 12px 32px rgba(0,0,0,.45);backdrop-filter:blur(6px)}
+.sugg-panel .sg-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 6px;font:700 12px var(--f-display);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.sugg-panel .sg-x{background:none;border:0;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:0 4px}
+.sugg-panel .sg-row{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:9px;padding:7px 8px;color:var(--fg);cursor:pointer;font:inherit}
+.sugg-panel .sg-row:hover,.sugg-panel .sg-row:focus-visible{background:var(--surface-2);border-color:var(--line);outline:none}
+.sugg-panel .sg-n{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#fff;color:#11161d;font:800 13px var(--f-display)}
+.sugg-panel .sg-row.top .sg-n{background:var(--accent)}
+.sugg-panel .sg-t{flex:1;min-width:0;font-size:13px;font-weight:600;line-height:1.25}
+.sugg-panel .sg-t small{display:block;font-weight:400;font-size:11.5px;color:var(--muted);margin-top:2px}
+.sugg-panel .sg-sc{flex:none;font:700 15px var(--f-display);color:var(--accent);min-width:22px;text-align:right}
+.sugg-panel .sg-foot,.sugg-panel .sg-msg{margin:6px 4px 2px;font-size:11.5px;color:var(--muted)}
+.sugg-panel .sg-msg{font-size:12.5px;line-height:1.4}
+body.clean .sugg-panel{display:none}
 #linesBtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #focusBtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
 #focusBtn.dimmed{opacity:.55}
@@ -585,6 +599,7 @@ body.clean .touchbar{display:none}
       <canvas id="pitchGL" aria-hidden="true"></canvas>
       <canvas id="pitch" aria-label="Tactics board pitch"></canvas>
       <div class="hint" id="hint"></div>
+      <div class="sugg-panel" id="suggPanel" hidden></div>
       <div class="ktip" id="ktip" hidden></div>
       <div class="upd-bar" id="updBar" hidden role="status"></div>
       <div id="coopCursors" aria-hidden="true"></div>
@@ -604,6 +619,7 @@ body.clean .touchbar{display:none}
         <label class="btn follow" id="followWrap" title="Keep the camera on the ball or one player during playback (` ball, 1–5 home, 6–0 away; K ball on/off)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg><select id="zoomFollow" aria-label="Camera follows"><option value="">Follow: off</option><option value="ball">Follow ball</option></select></label>
         <button class="btn icon" id="focusBtn" aria-pressed="false" title="Focus: dim everyone else while you follow a player" aria-label="Focus on the followed player"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
         <button class="btn icon" id="linesBtn" aria-pressed="false" title="Hide lines: show just the positions (Shift+H)" aria-label="Hide lines"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 17L17 5M13 5h4v4"/><path d="M3 21L21 3" stroke-width="1.6" opacity=".9"/></svg></button>
+        <button class="btn icon" id="suggBtn" aria-pressed="false" title="Suggest plays from the ball carrier (Shift+S)" aria-label="Suggest plays"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg></button>
         <button class="btn icon" id="otsBtn" aria-pressed="false" title="Over-the-shoulder: during playback the camera rides behind the followed player, like in game" aria-label="Over-the-shoulder camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 6.5a7 7 0 0 0 0 11"/><path d="M16.5 6.5a7 7 0 0 1 0 11"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg></button>
       </div>
       <div class="touchbar" id="touchbar" role="toolbar" aria-label="Drawing options" hidden></div>
@@ -2937,6 +2953,7 @@ function renderScene(c, pos, layers, o = {}){
   for (const L of layers) for (const s of L.shapes) if (!isZone(s)) drawShape(c, s, L.alpha, s.id === o.sel);
   if (o.runReach) drawRunReach(c, piece(o.runReach), kf, pos);
   if (o.draft && !isZone(o.draft)) drawShape(c, o.draft, .9, false);
+  if (suggOn && !anim.playing && !o.noSugg && pos === frame().pos && !otsActive()) drawSuggest(c);
   if (o.after) o.after(c);
   if (o.pieces) o.pieces(pos, kf); else drawPiecesLocal(c, pos, kf, o);
   return {lanes, shots};
@@ -3779,6 +3796,146 @@ function draw(){
   updateStats(P0, res.lanes, res.shots);
   if (coop.on) drawCursors();
 }
+
+/* ---------- play suggester ----------
+   From the ball carrier in this step, try every realistic move (passes to feet or into space, lofted balls, wall passes,
+   shots, carries) against the defenders with the board's own physics, and offer the best few as ghost arrows.
+   Timing model: a defender reacts after REACT s, then reaches a spot at sprint speed (Extra Effort if ready),
+   stretching DEF_REACH units. A ball can't be touched in its first passCfg.noTouch units. */
+let suggOn = false, suggHover = -1, suggCache = {key:'', list:null, msg:''};
+const SUGG_REACT = .2, DEF_REACH = 1.2, SUGG_N = 5;
+function suggGoalVal(team, q){ const gx = team === 'home' ? W : 0, d = Math.hypot(gx - q.x, H/2 - q.y); return Math.exp(-d/20); }
+function suggInPitch(q, m){ m = m == null ? 1.5 : m; return q.x > m && q.x < W - m && q.y > m && q.y < H - m; }
+/* lofted ball's time in the air over d units (the flatter of the two aims that land there), or null when out of range */
+function suggAirTime(d){ const R = PASS_RANGES[1].r; if (d > R) return null; const k = d*Math.sin(2*AIM_MAX)/R, th = Math.asin(Math.min(1, k))/2; return d/(SPEED.pass*Math.cos(th)); }
+function suggDefT(o, q, pos, f){ const d = Math.hypot(pos[o.id].x - q.x, pos[o.id].y - q.y); return SUGG_REACT + arriveTime(Math.max(0, d - DEF_REACH), hasEE(f, o.id)); }
+/* the tightest moment along a ground ball's path: defender arrival minus ball arrival, in seconds */
+function suggPathMargin(pts, opp, pos, f, v, t0){
+  const d = densify(pts, 1); let m = Infinity, who = null;
+  for (const q of d){ if (q.d < passCfg.noTouch) continue; const tb = (t0 || 0) + q.d/v;
+    for (const o of opp){ const k = suggDefT(o, q, pos, f) - tb; if (k < m){ m = k; who = o; } } }
+  return {m, who};
+}
+function suggRecv(t, mate, opp, pos, f, tb){
+  const tm = mate ? arriveTime(Math.max(0, dist(pos[mate.id], P(t)) - .6), hasEE(f, mate.id)) : 0;
+  let td = Infinity, who = null; for (const o of opp){ const k = suggDefT(o, P(t), pos, f); if (k < td){ td = k; who = o; } }
+  return {tm, margin:td - Math.max(tb, tm), who};
+}
+const suggName = p => `#${p.label}${p.name ? ' ' + p.name : ''}`;
+function computeSuggest(f){
+  const pos = f.pos, carrier = carrierOf(pos);
+  if (!carrier) return {list:[], msg:'Put a player on the ball to get suggestions.'};
+  const cp = piece(carrier), team = cp.team, a = pos[carrier], A = [a.x, a.y];
+  const ballMoves = f.shapes.some(s => (s.type === 'bank' && dist(P(s.a), a) < REACH + 1) || (s.type === 'arrow' && (s.style === 'pass' || s.style === 'dribble') && dist(P(s.pts[0]), a) < REACH + 1));
+  if (ballMoves) return {list:[], msg:'This step already has a ball move. Press N for the next step and the suggestions update.'};
+  const opp = players().filter(p => p.team !== team), mates = players().filter(p => p.team === team && p.id !== carrier);
+  const dir = team === 'home' ? 1 : -1, gx = team === 'home' ? W : 0, v0 = suggGoalVal(team, a), out = [];
+  const gain = q => (suggGoalVal(team, q) - v0)*170;
+  const fwd = q => (q.x - a.x)*dir;
+  const secs = s => s >= 1.95 ? '2 s+' : s.toFixed(1) + ' s';
+  /* how long the carrier can hold it before someone is on them: a pass into space can wait for its runner that long */
+  let press = Infinity; for (const o of opp) press = Math.min(press, suggDefT(o, a, pos, f));
+  const hold = Math.max(0, press - .35);
+  /* passes: to feet and into space around each teammate; a pass into space is played so it meets the runner */
+  const tryPass = (m, q, lead, kind, pts, tb, air) => {
+    const T = [q.x, q.y], tm = arriveTime(Math.max(0, dist(pos[m.id], q) - .6), hasEE(f, m.id)), wait = Math.max(0, tm - tb - .25);
+    if (wait > hold) return;
+    let lane = air ? (liftBlocker(A, T, pos, f, team) ? -1 : 9) : suggPathMargin(pts, opp, pos, f, SPEED.pass, wait).m;
+    if (lane <= .08) return false;
+    let td = Infinity; for (const o of opp) td = Math.min(td, suggDefT(o, q, pos, f));
+    const recv = td - (wait + tb + (air ? 0 : 0));
+    if (recv <= .05 || (air && markerNear(q, team, pos))) return;
+    out.push({kind, mate:m, lead, q, safe:Math.min(lane, recv), space:recv, wait, gain:gain(q), shapes:[], pts, air});
+    return true;
+  };
+  for (const m of mates){
+    const mp = pos[m.id], tgts = [{q:mp, lead:false}], toGoal = Math.atan2(H/2 - mp.y, gx - mp.x);
+    for (const da of [0, -.7, .7, -1.57, 1.57]) for (const L of [5, 10, 16]){
+      const q = {x:mp.x + Math.cos(toGoal + da)*L, y:mp.y + Math.sin(toGoal + da)*L}; if (suggInPitch(q)) tgts.push({q, lead:true}); }
+    for (const {q, lead} of tgts){
+      const T = [q.x, q.y], d = dist(a, q); if (d < 4) continue;
+      let ok = null;
+      if (d <= PASS_RANGES[1].r) ok = tryPass(m, q, lead, lead ? 'through' : 'pass', [A, T], d/SPEED.pass, false);
+      if (ok === false){ const ta = suggAirTime(d); if (ta) tryPass(m, q, lead, 'aerial', [A, T], ta, true); }
+      for (const wall of ['top', 'bottom']){ const b = bankPath(A, T, wall, false); if (!b.ok) continue;
+        const L = pathLen(b.pts); if (L > PASS_RANGES[1].r) continue;
+        if (tryPass(m, q, lead, 'wall', b.pts, L/SPEED.pass, false)) out[out.length - 1].wall = wall; }
+    }
+  }
+  for (const s of out) if (s.mate){
+    const fw = fwd(s.q) > 3, who = suggName(s.mate);
+    s.title = s.kind === 'aerial' ? `Lofted ball ${s.lead ? 'into space for' : 'to'} ${who}` : s.kind === 'wall' ? `Off the ${s.wall} wall ${s.lead ? 'into space for' : 'to'} ${who}` :
+      s.lead ? `${fw ? 'Through ball' : 'Pass into space'} for ${who}` : `Pass to ${who}`;
+    s.shapes = [s.kind === 'wall' ? {type:'bank', a:A, t:[s.q.x, s.q.y], wall:s.wall} : s.kind === 'aerial' ? {type:'arrow', style:'pass', air:true, recv:'control', pts:[A, [s.q.x, s.q.y]]} : {type:'arrow', style:'pass', pts:[A, [s.q.x, s.q.y]]}];
+  }
+  /* shot */
+  const S = computeShots(pos, f), gd = Math.hypot(gx - a.x, H/2 - a.y);
+  if (S && S.pct > .08 && gd < 48){
+    const runs = []; let st = null; S.samples.forEach((s, i) => { if (s.ok && st === null) st = i; if ((!s.ok || i === S.samples.length - 1) && st !== null){ runs.push([st, s.ok ? i : i - 1]); st = null; } });
+    const best = runs.sort((p, q) => (q[1] - q[0]) - (p[1] - p[0]))[0], y = (S.samples[best[0]].y + S.samples[best[1]].y)/2;
+    const xg = Math.pow(S.pct, .7)*Math.exp(-gd/26);
+    out.push({kind:'shot', q:{x:gx, y}, safe:1, space:1, xg, gain:0, pct:S.pct, gd, shapes:[{type:'arrow', style:'pass', shot:true, pts:[A, [gx + dir*.6, y]]}], title:'Shoot'});
+  }
+  /* carry: dribble into the space ahead */
+  const toG = Math.atan2(H/2 - a.y, gx - a.x), vd = SPEED.sprint*.85;
+  for (const da of [0, -.55, .55, -1.1, 1.1]) for (const L of [5, 9]){
+    const q = {x:a.x + Math.cos(toG + da)*L, y:a.y + Math.sin(toG + da)*L}; if (!suggInPitch(q, 2)) continue;
+    const ln = suggPathMargin([A, [q.x, q.y]], opp, pos, f, vd, -0); /* the carrier is on the ball from the start: no free stretch */
+    let m = Infinity; for (const p of densify([A, [q.x, q.y]], 1)){ const tb = p.d/vd; for (const o of opp) m = Math.min(m, suggDefT(o, p, pos, f) - tb); }
+    if (m > .15 && (q.x - a.x)*dir > 2.5) out.push({kind:'dribble', q, safe:m, space:m, gain:gain(q), shapes:[{type:'arrow', style:'dribble', pts:[A, [q.x, q.y]]}], title:'Carry it forward'});
+  }
+  for (const s of out){
+    s.score = clamp(Math.round(s.kind === 'shot' ? s.xg*220 : (s.gain*.7 + 26*clamp(fwd(s.q)/25, -1, 1.2) + Math.min(1, s.safe)*14 + Math.min(1.5, s.space)/1.5*10 - (s.wait > .6 ? 6 : 0) + 6)), 1, 99);
+    if (s.kind === 'shot') s.why = `${Math.round(s.pct*100)}% of the goal open · ${Math.round(s.gd)} units out`;
+    else if (s.kind === 'dribble') s.why = `${Math.round(fwd(s.q))} units forward · nearest defender ${secs(s.safe)} away`;
+    else s.why = [s.kind === 'aerial' ? 'over the lane' : s.kind === 'wall' ? 'round the press' : `lane clear by ${secs(s.safe)}`, ...(s.wait > .3 ? [`wait ${s.wait.toFixed(1)} s for the run`] : []),
+                  `${secs(s.space)} to control it`, fwd(s.q) > 2 ? `+${Math.round(fwd(s.q))} forward` : fwd(s.q) < -2 ? 'back to keep it' : 'square'].join(' · ');
+    if (s.lead && s.mate){ const mp = pos[s.mate.id]; if (dist(mp, s.q) > 1.5) s.shapes.push({type:'arrow', style:'run', pts:[[mp.x, mp.y], [s.q.x, s.q.y]], ee:hasEE(f, s.mate.id) || undefined}); }
+    s.shapes = s.shapes.map(x => ({...x, pts:x.pts && x.pts.map(r2), a:x.a && r2(x.a), t:x.t && r2(x.t), color}));
+  }
+  /* best few, varied: one per teammate and move type, two per teammate at most, one carry */
+  out.sort((p, q) => q.score - p.score);
+  if (out.some(s => s.score >= 10)) for (let i = out.length - 1; i >= 0; i--) if (out[i].score < 10) out.splice(i, 1);
+  const pick = [], seen = new Set(), per = {};
+  for (const s of out){ const who = s.mate ? s.mate.id : s.kind, key = who + s.kind;
+    if (seen.has(key) || (per[who] || 0) >= (s.mate ? 2 : 1)) continue; seen.add(key); per[who] = (per[who] || 0) + 1; pick.push(s); if (pick.length >= SUGG_N) break; }
+  return {list:pick, msg:pick.length ? '' : 'Nothing safe from here: every lane is covered. Try moving a teammate into space.', carrier:cp};
+}
+function suggState(){
+  const f = frame(), key = cur + JSON.stringify(f.pos) + f.shapes.length + JSON.stringify(f.ee || {}) + JSON.stringify(f.stance || {}) + doc.show.home + doc.show.away + color;
+  if (suggCache.key !== key){ suggCache = {key, ...computeSuggest(f)}; suggHover = -1; renderSuggPanel(); }
+  return suggCache;
+}
+function drawSuggest(c){
+  const S = suggState(); if (!S.list.length) return;
+  S.list.forEach((s, i) => { if (suggHover >= 0 && i !== suggHover) return;
+    for (const sh of s.shapes) drawShape(c, {...sh, id:'sugg' + i}, suggHover === i ? .95 : i === 0 ? .8 : .22, false); });
+  S.list.forEach((s, i) => { if (suggHover >= 0 && i !== suggHover) return;
+    const sh = s.shapes[0], pts = sh.type === 'bank' ? bankOf(sh).pts : sh.pts, d = densify(pts, .5), q = d[Math.floor(d.length*.55)];
+    c.save(); c.beginPath(); c.arc(q.x, q.y, 1.15, 0, Math.PI*2); c.fillStyle = i === 0 ? '#f2b33d' : '#ffffff'; c.globalAlpha = .95; c.fill();
+    c.lineWidth = .16; c.strokeStyle = '#11161d'; c.stroke(); c.restore();
+    fieldText(c, String(i + 1), q.x, q.y + .05, 1.25, '#11161d', `800 20px ${FD}`, false); });
+}
+function renderSuggPanel(){
+  const el = $('#suggPanel'); if (!el) return;
+  el.hidden = !suggOn; if (!suggOn) return;
+  const S = suggCache;
+  el.innerHTML = `<div class="sg-head"><span>Suggestions${S.carrier ? ` · from ${esc(suggName(S.carrier))}` : ''}</span><button class="sg-x" id="suggClose" title="Close (Shift+S)" aria-label="Close">×</button></div>` +
+    (S.list && S.list.length ? S.list.map((s, i) => `<button class="sg-row${i === 0 ? ' top' : ''}" data-sg="${i}"><b class="sg-n">${i + 1}</b><span class="sg-t">${esc(s.title)}<small>${esc(s.why)}</small></span><span class="sg-sc" title="Rating">${s.score}</span></button>`).join('') +
+      '<p class="sg-foot">Hover to preview · click to add it to this step</p>' : `<p class="sg-msg">${esc(S.msg || '')}</p>`);
+  $('#suggClose').onclick = () => toggleSuggest(false);
+  el.querySelectorAll('[data-sg]').forEach(b => { const i = +b.dataset.sg;
+    b.onmouseenter = () => { suggHover = i; draw(); }; b.onmouseleave = () => { suggHover = -1; draw(); };
+    b.onfocus = b.onmouseenter; b.onblur = b.onmouseleave; b.onclick = () => applySuggest(i); });
+}
+function applySuggest(i){
+  if (!coopCanEdit()) return; const s = suggCache.list && suggCache.list[i]; if (!s) return;
+  stopPlay(); snapshot(); const f = frame();
+  for (const sh of s.shapes) f.shapes.push({...clone(sh), id:uid()});
+  suggHover = -1; commit(); toast(`Added: ${s.title}. Press N for the next step, and the suggestions carry on from there.`);
+}
+function toggleSuggest(on){ suggOn = on === undefined ? !suggOn : on; $('#suggBtn').setAttribute('aria-pressed', suggOn); suggCache.key = ''; suggHover = -1;
+  if (suggOn){ suggState(); } renderSuggPanel(); draw(); }
 
 /* ---------- stats ---------- */
 function updateStats(pos, L, S){
@@ -5293,7 +5450,7 @@ function exportCanvas(){
   const c2 = document.createElement('canvas'); c2.width = 1920; c2.height = Math.round(VH*scale) + capH;
   const c = c2.getContext('2d'); c.fillStyle = '#0a0f15'; c.fillRect(0, 0, c2.width, c2.height);
   c.setTransform(scale, 0, 0, scale, M*scale, M*scale);
-  renderScene(c, frame().pos, [{shapes:frame().shapes, alpha:1}], {trails:trailInfo()});
+  renderScene(c, frame().pos, [{shapes:frame().shapes, alpha:1}], {trails:trailInfo(), noSugg:true});
   c.setTransform(1, 0, 0, 1, 0, 0); c.textBaseline = 'middle';
   c.font = `700 34px ${FD}`; c.fillStyle = '#e8edf4'; c.textAlign = 'left'; c.fillText(doc.name.toUpperCase(), 64, 40);
   c.font = `600 22px ${FM}`; c.fillStyle = '#f2b33d'; c.textAlign = 'right'; c.fillText(`STEP ${cur + 1}/${doc.frames.length}`, 1920 - 64, 40);
@@ -5487,6 +5644,7 @@ $('#otsBtn').addEventListener('click', () => { otsOn = !otsOn; saveSettings(); s
 function toggleLines(on){ hideLines = on === undefined ? !hideLines : on; $('#linesBtn').setAttribute('aria-pressed', hideLines); if (hideLines && sel){ sel = null; syncSel(); } draw();
   toast(hideLines ? 'Lines hidden: just the positions (zones and text stay). Shift+H brings them back.' : 'Lines shown.'); }
 $('#linesBtn').addEventListener('click', () => toggleLines());
+$('#suggBtn').addEventListener('click', () => toggleSuggest());
 $('#focusBtn').addEventListener('click', () => { focusOn = !focusOn; saveSettings(); syncZoomUI(); redraw();
   toast(focusOn ? (followBall && followId !== 'ball' ? 'Focus on: everyone else dims during playback.' : 'Focus on. Pick a player in Follow to focus on them during playback.') : 'Focus off.'); });
 $('#fsBtn').addEventListener('click', () => {
@@ -5516,7 +5674,7 @@ function optKeys(){
   $('#optKeys').innerHTML = '<h3>Tools</h3>' + TOOLS.filter(t => document.querySelector(`[data-tool="${t.id}"]`)).map(t => K(t.key, t.name)).join('') +
     '<h3>While drawing</h3>' + [['Shift', 'Aerial pass or shot · lofted wall pass · straight pen line or zone edge'], ['Q', 'Extra Effort on the run'], ['[ ]', 'Curve a shot (scroll works too) · pen thickness'], ['V', 'Receiver volleys an aerial pass'], ['W', 'Next wall for a wall pass'], ['Alt', 'Start exactly where you click'], ['Esc', 'Cancel']].map(r => K(...r)).join('') +
     '<h3>Steps and playback</h3>' + [['Space', 'Play / pause'], ['← →', 'Previous / next step'], ['N', 'Next step'], ['`', 'Camera follows the ball'], ['1–5 6–0', 'Follow a home / away player'], ['K', 'Follow the ball on / off']].map(r => K(...r)).join('') +
-    '<h3>Board</h3>' + [['Ctrl+Z', 'Undo'], ['Ctrl+Shift+Z', 'Redo'], ['Ctrl+S', 'Save play'], ['Delete', 'Remove the selected drawing or hovered player'], ['X', 'Defensive stance (hovered player)'], ['Y', 'Next camera view'], ['+ −', 'Zoom'], ['Shift+0', 'Fit the board'], ['Shift+1–5', 'Drawing colour'], ['H', 'Clean view'], ['Shift+H', 'Hide lines (positions only)'], ['Shift+U', 'Protractor'], ['Ctrl+,', 'Options']].map(r => K(...r)).join('') +
+    '<h3>Board</h3>' + [['Ctrl+Z', 'Undo'], ['Ctrl+Shift+Z', 'Redo'], ['Ctrl+S', 'Save play'], ['Delete', 'Remove the selected drawing or hovered player'], ['X', 'Defensive stance (hovered player)'], ['Y', 'Next camera view'], ['+ −', 'Zoom'], ['Shift+0', 'Fit the board'], ['Shift+1–5', 'Drawing colour'], ['H', 'Clean view'], ['Shift+H', 'Hide lines (positions only)'], ['Shift+S', 'Suggest plays'], ['Shift+U', 'Protractor'], ['Ctrl+,', 'Options']].map(r => K(...r)).join('') +
     '<h3>Analysis</h3>' + [['C', 'Space control'], ['L', 'Passing lanes'], ['S', 'Shot window'], ['G', 'Pressure rings'], ['A', 'Pass range'], ['M', 'Grid']].map(r => K(...r)).join('');
 }
 function optOpen(tab){ optSync(); optKeys(); $('#optBack').hidden = false; if (tab) optTab(tab); setTimeout(() => $('#optClose').focus(), 0); }
@@ -5591,6 +5749,7 @@ document.addEventListener('keydown', e => {
   if (k === ' '){ e.preventDefault(); anim.playing ? stopPlay() : startPlay(); return; }
   if (k === 'n'){ addStep(); return; }
   if (k === 'h' && e.shiftKey){ toggleLines(); return; }
+  if (k === 's' && e.shiftKey){ toggleSuggest(); return; }
   if (k === 'u' && e.shiftKey){ setTool('protractor'); return; }
   if (k === 'h'){ toggleClean(); return; }
   if (k === '=' || k === '+'){ zoomStep(1); return; }
